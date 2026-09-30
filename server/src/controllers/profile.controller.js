@@ -2,6 +2,14 @@ const Profile = require('../models/Profile');
 const { asyncHandler } = require('../utils/errors');
 const logger = require('../utils/logger');
 
+const DEFAULT_EMPTY_PROFILE = {
+  headline: '',
+  targetRole: '',
+  skills: [],
+  education: [],
+  experience: [],
+};
+
 /**
  * Get current user's profile
  * GET /api/profile
@@ -11,7 +19,7 @@ const getProfile = asyncHandler(async (req, res) => {
   const profile = await Profile.findOne({ userId: req.user.id });
 
   return res.status(200).json({
-    profile: profile || null,
+    profile: profile || DEFAULT_EMPTY_PROFILE,
   });
 });
 

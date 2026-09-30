@@ -1,30 +1,31 @@
 class AppError extends Error {
-  constructor(message, statusCode = 500, details = null) {
+  constructor(message, statusCode = 500, code = 'INTERNAL_ERROR', details = null) {
     super(message);
     this.name = this.constructor.name;
     this.statusCode = statusCode;
+    this.code = code;
     this.details = details;
     Error.captureStackTrace(this, this.constructor);
   }
 }
 
 class AuthError extends AppError {
-  constructor(message = 'Authentication required') {
-    super(message, 401);
+  constructor(message = 'Authentication required', code = 'UNAUTHORIZED') {
+    super(message, 401, code);
     this.isAuthError = true;
   }
 }
 
 class NotFoundError extends AppError {
-  constructor(message = 'Resource not found') {
-    super(message, 404);
+  constructor(message = 'Resource not found', code = 'NOT_FOUND') {
+    super(message, 404, code);
     this.isNotFound = true;
   }
 }
 
 class AiError extends AppError {
-  constructor(message = 'Analysis service is temporarily unavailable, please try again') {
-    super(message, 502);
+  constructor(message = 'Analysis service is temporarily unavailable, please try again', code = 'AI_SERVICE_UNAVAILABLE') {
+    super(message, 502, code);
     this.isAiError = true;
   }
 }

@@ -10,18 +10,24 @@ function errorHandler(err, req, res, next) {
   // 0a. Malformed JSON Body -> 400
   if (err.type === 'entity.parse.failed' || (err instanceof SyntaxError && err.status === 400 && 'body' in err)) {
     return res.status(400).json({
-      error: 'Invalid JSON body',
+      error: {
+        code: 'INVALID_JSON',
+        message: 'Invalid JSON body',
+      },
     });
   }
 
   // 0b. Body Too Large -> 413
   if (err.type === 'entity.too.large' || err.status === 413 || err.statusCode === 413) {
     return res.status(413).json({
-      error: 'Request body too large',
+      error: {
+        code: 'PAYLOAD_TOO_LARGE',
+        message: 'Request body too large',
+      },
     });
   }
 
-  // 1. Zod Validation Error -> 400 with details
+  // 1. Zod Validation Error -> 400 with details (safe field path and message only)
   if (err instanceof ZodError || err.name === 'ZodError') {
     const details = (err.issues || []).map((issue) => ({
       field: issue.path.join('.'),
@@ -34,15 +40,21 @@ function errorHandler(err, req, res, next) {
       details,
     });
     return res.status(400).json({
-      error: 'Validation failed',
-      details,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details,
+      },
     });
   }
 
   // 2. Mongoose CastError or invalid ID -> 400
   if (err.name === 'CastError' || err.code === 'INVALID_OBJECT_ID') {
     return res.status(400).json({
-      error: 'Invalid identifier format',
+      error: {
+        code: 'INVALID_ID',
+        message: 'Invalid identifier format',
+      },
     });
   }
 
@@ -54,7 +66,10 @@ function errorHandler(err, req, res, next) {
       method: req.method,
     });
     return res.status(409).json({
-      error: 'Email already registered',
+      error: {
+        code: 'DUPLICATE_EMAIL',
+        message: 'Email already registered',
+      },
     });
   }
 
@@ -71,7 +86,10 @@ function errorHandler(err, req, res, next) {
       method: req.method,
     });
     return res.status(401).json({
-      error: 'Authentication required',
+      error: {
+        code: 'UNAUTHORIZED',
+        message: 'Authentication required',
+      },
     });
   }
 
@@ -84,7 +102,10 @@ function errorHandler(err, req, res, next) {
       method: req.method,
     });
     return res.status(404).json({
-      error: 'Resource not found',
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Resource not found',
+      },
     });
   }
 
@@ -97,15 +118,21 @@ function errorHandler(err, req, res, next) {
       message: err.message,
     });
     return res.status(502).json({
-      error: 'Analysis service is temporarily unavailable, please try again',
+      error: {
+        code: 'AI_SERVICE_UNAVAILABLE',
+        message: 'Analysis service is temporarily unavailable, please try again',
+      },
     });
   }
 
   // 7. Handled AppError with explicit status code
   if (err.statusCode && err.statusCode !== 500) {
-    const response = { error: err.message };
-    if (err.details) response.details = err.details;
-    return res.status(err.statusCode).json(response);
+    const errorBody = {
+      code: err.code || 'APP_ERROR',
+      message: err.message,
+    };
+    if (err.details) errorBody.details = err.details;
+    return res.status(err.statusCode).json({ error: errorBody });
   }
 
   // 8. Unhandled or internal errors -> 500
@@ -118,7 +145,10 @@ function errorHandler(err, req, res, next) {
   });
 
   return res.status(500).json({
-    error: 'Something went wrong',
+    error: {
+      code: 'INTERNAL_ERROR',
+      message: 'Something went wrong',
+    },
   });
 }
 

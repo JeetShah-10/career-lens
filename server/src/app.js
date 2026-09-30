@@ -40,7 +40,12 @@ const globalLimiter = rateLimit({
       route: req.originalUrl,
       method: req.method,
     });
-    res.status(429).json({ error: 'Too many requests, please try again later' });
+    res.status(429).json({
+      error: {
+        code: 'RATE_LIMIT_EXCEEDED',
+        message: 'Too many requests, please try again later',
+      },
+    });
   },
 });
 

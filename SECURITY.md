@@ -99,7 +99,7 @@ The resume text and the job description are **untrusted input that gets fed to a
   - Global: 100 requests / 15 min / IP
   - `/api/auth/*`: 10 requests / 15 min / IP (brute-force protection)
   - `POST /api/analyses`: about 5 / min and a daily cap per user (quota protection)
-- On limit exceeded return **429** with `{ "error": "Too many requests, please try again later" }` and log it (Section 10).
+- On limit exceeded return **429** with `{ "error": { "code": "RATE_LIMIT_EXCEEDED", "message": "Too many requests, please try again later" } }` and log it (Section 10).
 - Set a request body size limit (e.g. `express.json({ limit: '100kb' })`).
 
 ## 9. HTTP hardening
@@ -114,15 +114,15 @@ The resume text and the job description are **untrusted input that gets fed to a
 
 - One central error-handling middleware is the last `app.use`. Every controller uses `next(err)` or a wrapper for async errors. **No unhandled promise rejections.**
 - **Production responses never include stack traces, Mongo error codes, file paths or raw error messages.** Internal details go to server logs only.
-- Client-facing error shape is always `{ "error": "message", "details": [...optional field errors...] }`.
+- Client-facing error shape is always `{ "error": { "code": "...", "message": "...", "details": [...] } }`. Details are included only for validation errors, where each item contains only a safe field path and message—never submitted values, passwords, resume text, or personal data.
 - Mapping:
-  - zod validation error → 400 or 422 with field `details`
-  - Mongoose `CastError` or invalid id → 400
-  - Mongo duplicate key (code 11000) → 409 `Email already registered`
-  - Missing or invalid token → 401 `Authentication required`
-  - Not owned or not found → 404 `Resource not found`
-  - AI provider failure, timeout or invalid output after retry → 502 `Analysis service is temporarily unavailable, please try again`
-  - Anything else → 500 `Something went wrong`
+  - zod validation error → 400 with `{ "error": { "code": "VALIDATION_ERROR", "message": "Validation failed", "details": [...] } }`
+  - Mongoose `CastError` or invalid id → 400 with `{ "error": { "code": "INVALID_ID", "message": "Invalid identifier format" } }`
+  - Mongo duplicate key (code 11000) → 409 with `{ "error": { "code": "DUPLICATE_EMAIL", "message": "Email already registered" } }`
+  - Missing or invalid token → 401 with `{ "error": { "code": "UNAUTHORIZED", "message": "Authentication required" } }`
+  - Not owned or not found → 404 with `{ "error": { "code": "NOT_FOUND", "message": "Resource not found" } }`
+  - AI provider failure, timeout or invalid output after retry → 502 with `{ "error": { "code": "AI_SERVICE_UNAVAILABLE", "message": "Analysis service is temporarily unavailable, please try again" } }`
+  - Anything else → 500 with `{ "error": { "code": "INTERNAL_ERROR", "message": "Something went wrong" } }`
 - Give the AI call a timeout (e.g. 30-45 s) so a hung provider does not hang the request.
 
 ## 11. Security logging

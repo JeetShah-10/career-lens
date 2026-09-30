@@ -18,7 +18,12 @@ const register = asyncHandler(async (req, res) => {
       ip: req.ip,
       email,
     });
-    return res.status(409).json({ error: 'Email already registered' });
+    return res.status(409).json({
+      error: {
+        code: 'DUPLICATE_EMAIL',
+        message: 'Email already registered',
+      },
+    });
   }
 
   // Hash password with bcrypt cost 12
@@ -68,7 +73,12 @@ const login = asyncHandler(async (req, res) => {
       ip: req.ip,
       email,
     });
-    return res.status(401).json({ error: 'Invalid email or password' });
+    return res.status(401).json({
+      error: {
+        code: 'INVALID_CREDENTIALS',
+        message: 'Invalid email or password',
+      },
+    });
   }
 
   const token = signToken(user._id);
@@ -94,7 +104,12 @@ const login = asyncHandler(async (req, res) => {
 const getMe = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user.id);
   if (!user) {
-    return res.status(404).json({ error: 'Resource not found' });
+    return res.status(404).json({
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Resource not found',
+      },
+    });
   }
 
   return res.status(200).json({

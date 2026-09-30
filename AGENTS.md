@@ -246,10 +246,16 @@ DELETE /api/analyses/:id                                          -> 204
 ### Error shape (every error, everywhere)
 
 ```json
-{ "error": "Human-readable message", "details": [{ "field": "email", "message": "Invalid email" }] }
+{
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human-readable message",
+    "details": [{ "field": "email", "message": "Invalid email" }]
+  }
+}
 ```
 
-`details` is optional (used for validation errors). Never send stack traces or internal error text to the client.
+`details` is optional (used for validation errors). Each item in `details` contains only a safe field path and message—never submitted values, passwords, resume text, or other personal data. Never send stack traces or internal error text to the client.
 
 ---
 
