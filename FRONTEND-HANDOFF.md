@@ -1,7 +1,7 @@
 # FRONTEND-HANDOFF.md — CareerLens Frontend Developer Handoff
 
 > **Target Audience:** Pooja (Frontend Engineering) & Pair Programming Agents.
-> **Status:** Backend Core API, Auth, Profile, All 3 Analysis Sources (Paste, PDF, Profile), History, Security, and 56 Automated Tests are Complete.
+> **Status:** Backend Core API, Auth, Profile, All 3 Analysis Sources (Paste, PDF, Profile), History, Security, Local Demo Seeder, and 69 Automated Tests are Complete.
 > **Source of Truth:** This file reflects the verified backend code in `server/src/`. Follow these contracts exactly.
 
 ---
@@ -20,20 +20,82 @@
 | **Analysis Detail (`GET /api/analyses/:id`)**| **Completed & Verified** | Returns full analysis with `result` payload. Strips raw `resumeText` and `jobDescription`. |
 | **Analysis Delete (`DELETE /api/analyses/:id`)**| **Completed & Verified** | Returns `204 No Content`. Scoped to `req.user.id`. |
 | **Gemini Fallback (`ai.service.js`)** | **Completed & Tested (Mocked)** | Single bounded fallback from `gemini-3.8-flash` to `gemini-3.5-flash` on 503 spikes. |
-| **Automated Test Suite** | **56 / 56 Passing (12 Suites)** | 100% offline via in-memory MongoDB (`mongodb-memory-server`) & mocked AI. |
-| **Browser Cookie Persistence** | **Ready for Frontend Wiring** | Automated test suite passes; cross-site cookie retention across refreshes to be verified once frontend is live. |
+| **Automated Test Suite** | **69 / 69 Passing (15 Suites)** | 100% offline via in-memory MongoDB (`mongodb-memory-server`) & mocked AI. |
+| **Local Demo Seeder (`seed:demo`)** | **Completed & Guard-Tested** | Pre-computes 3 synthetic analyses offline with loopback protection and one-time password generation. |
+| **Browser Cookie Persistence** | **Pending Live Integration** | Automated test suite passes; cross-site cookie retention across refreshes remains untested and must be verified in a real browser after deployment. |
 
 ---
 
-## 2. Safe Local Setup & Environment
+## 2. Architecture: Online Deployment vs. Local Offline Demo Setup
 
-The frontend must never receive or configure backend secrets (MongoDB URI, JWT secret, or Gemini API keys).
+### 2.1 One Frontend, One API Contract (No Separate Demo App or Mock Backend)
+- **Single Source of Truth:** Pooja builds **one** React application against the real REST API contracts in this document.
+- **No Mock Engine in React:** Do **not** build a separate demo mode, mock service worker (MSW), or simulated backend state in React. The frontend makes standard, real HTTP calls in every scenario.
+- **Environment Agnostic:** The exact same frontend codebase connects to whichever backend is configured via `VITE_API_URL`:
+  - **Deployed Production API:** `VITE_API_URL=https://<your-render-backend>.onrender.com`
+  - **Local Development / Offline Rehearsal:** `VITE_API_URL=http://localhost:5000`
+- **Credentialed Cookies Everywhere:** In both local and deployed modes, every API call must send cookies (`withCredentials: true` in Axios or `credentials: 'include'` in Fetch). **NOTE:** In local development, `http://localhost:5173` (Vite) and `http://localhost:5000` (Express) are different origins because their ports differ (though they share the `localhost` site). The backend explicitly allows `CLIENT_ORIGIN=http://localhost:5173` with credentialed CORS. However, cross-site third-party cookie retention between the deployed frontend (e.g. Vercel) and backend (e.g. Render) remains untested and must be verified in real browsers (Chrome, Safari, Firefox) after deployment.
 
+### 2.2 Normal Product Flow vs. Optional Seeded Demo Data
+- **Normal Product Flow (Online & Live):**
+  1. **Auth / Session Restore:** `GET /api/auth/me` on startup restores the session from HttpOnly cookies.
+  2. **Profile View/Edit:** `GET /api/profile` loads candidate background; `PUT /api/profile` updates it.
+  3. **New Resume Analysis:** User pastes resume text, uploads a PDF, or analyzes their saved profile. The backend validates input, calls Google Gemini, validates the structured JSON output, persists it to MongoDB, and returns the full analysis.
+  4. **Results Display:** Renders overall score, score breakdown bars (`skills`, `experience`, `formatting`, `impact`), summary, strengths, weaknesses, recommended skills with priority badges, and career suggestions.
+  5. **History & Filtering:** `GET /api/analyses` retrieves paginated summaries. Users filter by supported parameters (`role`, `minScore`, `maxScore`, `from`, `to`, `sort`, `page`, `limit`), inspect past full results (`GET /api/analyses/:id`), or delete analyses (`DELETE /api/analyses/:id`).
+- **Optional Seeded Demo Data (Presentation Contingency):**
+  - Seeded analyses are **precomputed synthetic fixtures** created exclusively via Jeet's backend CLI script (`npm run seed:demo`) into a local persistent database.
+  - Seeded analyses use the **exact same** MongoDB collection, Express routes, and JSON response shapes as live user analyses.
+  - They do **not** call Gemini, do **not** generate new analyses, and do **not** prove Gemini is operational.
+  - **Do Not Wait for Seeded Data:** Pooja does **not** need to wait for the seeder to be executed to build or test the frontend. The entire UI can be developed, tested, and verified right now against the real API contract using normal user registration and resume analysis.
+
+### 2.3 What Works Completely Offline (Zero Wi-Fi) vs. What Requires Internet
+When the frontend (`http://localhost:5173`), Express backend (`http://localhost:5000`), and local MongoDB (Docker on `127.0.0.1:27017`) are running on the presentation laptop:
+
+| User Flow | Offline (Zero Wi-Fi) | Online Required (Hotspot) |
+|---|:---:|:---:|
+| **User Sign In / Sign Out** (HttpOnly cookies) | **Works 100%** | — |
+| **Profile View & Edit** (`GET/PUT /api/profile`) | **Works 100%** | — |
+| **History Listing** (`GET /api/analyses`) | **Works 100%** | — |
+| **History Filters & Search** (Exact params: `role`, `minScore`, `maxScore`, `from`, `to`, `sort`) | **Works 100%** | — |
+| **Reopening Past Analysis Detail** (`GET /api/analyses/:id`) | **Works 100%** | — |
+| **Deleting an Analysis Card** (`DELETE /api/analyses/:id`) | **Works 100%** | — |
+| **Submitting a *New* Resume Analysis** (Paste, PDF, Profile) | — | **Requires Gemini API** |
+
+*Stage Pitch Strategy:* If venue Wi-Fi is unreliable or drops completely, run the presentation on `localhost` against the preloaded synthetic analyses to demonstrate history, filters, score breakdowns, and profile editing with zero latency. Reserve a phone mobile hotspot specifically for demonstrating one new live AI analysis.
+
+### 2.4 Identifying and Labeling Synthetic Demo Records in the UI
+The backend intentionally does **not** inject an artificial boolean `isDemo: true` property into the data model. Instead, synthetic fixtures are identified transparently using verified fields in the actual API contracts:
+- **In History Summaries (`GET /api/analyses` -> `items[]`):**
+  Each item provides `{ id, targetRole, resumeSource, overallScore, createdAt, updatedAt }`.
+  Synthetic demo records have a `targetRole` starting with `"[DEMO]"`.
+  ```javascript
+  const isSyntheticDemo = item.targetRole.startsWith('[DEMO]');
+  ```
+- **In Analysis Detail (`GET /api/analyses/:id` -> `analysis`):**
+  The full result summary begins with `"[OFFLINE EXHIBITION FIXTURE]"`.
+  ```javascript
+  const isSyntheticDetail = analysis.result.summary.startsWith('[OFFLINE EXHIBITION FIXTURE]');
+  ```
+- **UI Recommendation:**
+  When `targetRole.startsWith('[DEMO]')`, render a clear, non-intrusive badge next to the role title:
+  ```jsx
+  {item.targetRole.startsWith('[DEMO]') && (
+    <span className="px-2 py-0.5 text-xs font-medium rounded bg-amber-100 text-amber-800 border border-amber-200">
+      Demo Fixture
+    </span>
+  )}
+  ```
+  This guarantees judges see full transparency that the preloaded historical records are synthetic exhibition fixtures.
+
+### 2.5 Safe Local Setup & Environment
 Create `client/.env` (or `client/.env.local`):
 ```bash
 # Base URL for Express API
 VITE_API_URL=http://localhost:5000
 ```
+
+*(For backend and operator instructions on starting the local Docker MongoDB container and running the seeder, refer to `DEMO-SETUP.md`).*
 
 ---
 
@@ -471,6 +533,7 @@ Every error returned by the API adheres to this format:
 ### Phase 3: History & Filters
 - [ ] Build **History List Page** (`GET /api/analyses`):
   - Displays summary cards (Target role, date, overall score, source badge).
+  - Transparent demo badging: If `item.targetRole.startsWith('[DEMO]')`, render a "Demo Fixture" badge on the card and detail header.
   - Filter controls: Role search input, min/max score sliders/inputs, sort dropdown (`newest`, `oldest`, `score_desc`, `score_asc`).
   - Pagination controls (`page`, `pages`, `total`).
   - Empty states (for no history, and for filters returning zero items).
