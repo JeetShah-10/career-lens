@@ -172,10 +172,16 @@ Users can save and edit their structured background info.
 
 ## 6. Resume Analysis Creation (`POST /api/analyses`)
 
-### Request Limits & Input
+### Request Limits & Input Formats
 - **URL:** `POST /api/analyses`
 - **Rate Limit:** 5 requests per minute per user/IP (`429 RATE_LIMIT_EXCEEDED` if exceeded).
-- **Body:**
+- **Supported Content Types:**
+  1. `application/json` (Text Paste)
+  2. `multipart/form-data` (PDF Upload)
+
+#### Option 1: JSON Body (Text Paste)
+- **Header:** `Content-Type: application/json`
+- **Body Schema:**
   ```json
   {
     "resumeText": "John Doe\nExperienced Full Stack Engineer with 5 years in React, Node...",
@@ -187,6 +193,21 @@ Users can save and edit their structured background info.
   - `resumeText`: Required. String min 50 characters, max 20,000 characters.
   - `targetRole`: Required. String min 2 characters, max 100 characters.
   - `jobDescription`: Optional. String max 10,000 characters. Defaults to empty string.
+- **Output:** Stored with `"resumeSource": "paste"`.
+
+#### Option 2: Multipart Form-Data (PDF File Upload)
+- **Header:** `Content-Type: multipart/form-data` (or let Axios set boundaries automatically with `FormData`)
+- **Form Fields:**
+  - `file`: Required binary file. Must be a valid PDF (`application/pdf`, `%PDF` magic bytes).
+  - `targetRole`: Required string (min 2, max 100 characters).
+  - `jobDescription`: Optional string (max 10,000 characters).
+- **Backend File Limits & Safety:**
+  - Max size: **5 MB**. Files exceeding this return `400 FILE_TOO_LARGE`.
+  - Memory storage only: No arbitrary files written to server disk.
+  - Text Extraction: Extracted in memory using `pdf-parse`.
+  - Scanned/Empty Detection: If a PDF contains fewer than 50 extractable characters (e.g. image-only scan or empty doc), returns `422 EMPTY_OR_SCANNED_PDF` with actionable guidance: *"Uploaded PDF contains insufficient readable text (<50 characters). Please paste your resume text directly or upload a text-based PDF."*
+  - Corrupt PDFs: Return `422 UNREADABLE_PDF`.
+- **Output:** Stored with `"resumeSource": "pdf"`.
 
 ### Output Result Schema
 - **Success (`201 Created`):**
@@ -346,10 +367,14 @@ Every error returned by the API adheres to this format:
 ### Common Error Codes
 - `VALIDATION_ERROR` (400): Form inputs failed Zod validation. Check `details[]`.
 - `INVALID_ID` (400): Malformed Mongo ObjectId parameter.
+- `INVALID_FILE_TYPE` (400): Uploaded file is not a PDF or lacks `%PDF` magic bytes.
+- `FILE_TOO_LARGE` (400): Uploaded file exceeds the 5 MB limit.
 - `UNAUTHORIZED` (401): Missing, invalid, or expired cookie.
 - `FORBIDDEN` (403): CSRF Origin/Referer check failed.
 - `NOT_FOUND` (404): Resource does not exist or belongs to another user.
 - `DUPLICATE_EMAIL` (409): Email already registered.
+- `EMPTY_OR_SCANNED_PDF` (422): Uploaded PDF is scanned/image-only or yields <50 characters of readable text. User should paste text instead.
+- `UNREADABLE_PDF` (422): PDF file is damaged or corrupted.
 - `RATE_LIMIT_EXCEEDED` (429): Exceeded general, auth, or analysis rate limits.
 - `AI_SERVICE_UNAVAILABLE` (502): Gemini API timeout, demand overload, or failed schema validation.
 - `INTERNAL_ERROR` (500): Server error.
@@ -369,10 +394,12 @@ Every error returned by the API adheres to this format:
 ### Phase 2: Profile & Analysis Core Flow
 - [ ] Build **Profile Screen** (`GET /api/profile` and `PUT /api/profile`) with empty default handling.
 - [ ] Build **New Analysis Form** (`POST /api/analyses`) supporting:
+  - Toggle between **Paste Resume Text** and **Upload PDF Resume** (drag & drop or file picker, max 5MB).
   - Textarea for resume text (min 50, max 20,000 chars with live counter).
   - Target role input (min 2, max 100 chars).
   - Optional job description textarea.
   - Loading spinner / animated progress states during the 5–15s AI analysis call.
+  - Clear user guidance for `EMPTY_OR_SCANNED_PDF` (prompting fallback to paste).
 - [ ] Build **Results Page** rendering:
   - Overall score badge and score breakdown bars (`skills`, `experience`, `formatting`, `impact`).
   - Executive summary and strengths/weaknesses tags.

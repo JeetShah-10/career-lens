@@ -43,8 +43,18 @@ const analysisCreateLimiter = rateLimit({
 // All analysis routes require authentication
 router.use(auth);
 
-// POST /api/analyses - create a new resume analysis
-router.post('/', analysisCreateLimiter, validate(createAnalysisSchema), createAnalysis);
+const { uploadPdf } = require('../middleware/upload');
+const processResumeInput = require('../middleware/resumeInput');
+
+// POST /api/analyses - create a new resume analysis (supports JSON paste & multipart PDF upload)
+router.post(
+  '/',
+  analysisCreateLimiter,
+  uploadPdf('file'),
+  processResumeInput,
+  validate(createAnalysisSchema),
+  createAnalysis
+);
 
 // GET /api/analyses - list analyses with pagination and filters
 router.get('/', validate({ query: queryAnalysesSchema }), getAnalyses);

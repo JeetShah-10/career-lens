@@ -126,13 +126,14 @@ function errorHandler(err, req, res, next) {
   }
 
   // 7. Handled AppError with explicit status code
-  if (err.statusCode && err.statusCode !== 500) {
+  const explicitStatus = err.statusCode || err.status;
+  if (explicitStatus && explicitStatus !== 500) {
     const errorBody = {
       code: err.code || 'APP_ERROR',
       message: err.message,
     };
     if (err.details) errorBody.details = err.details;
-    return res.status(err.statusCode).json({ error: errorBody });
+    return res.status(explicitStatus).json({ error: errorBody });
   }
 
   // 8. Unhandled or internal errors -> 500

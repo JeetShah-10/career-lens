@@ -26,10 +26,11 @@ const createAnalysis = asyncHandler(async (req, res) => {
   });
 
   // Persist analysis strictly bound to verified user
+  const resumeSource = req.resumeSource || 'paste';
   const analysis = await Analysis.create({
     userId: req.user.id,
     resumeText,
-    resumeSource: 'paste',
+    resumeSource,
     targetRole,
     jobDescription: jobDescription || '',
     overallScore: result.overallScore,

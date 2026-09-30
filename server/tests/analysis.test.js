@@ -327,6 +327,109 @@ describe('CareerLens Analysis & History Integration Test Suite', () => {
     });
   });
 
+  describe('POST /api/analyses (PDF File Upload Support)', () => {
+    const validPdfBuffer = Buffer.from(
+      '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n4 0 obj\n<< /Length 55 >>\nstream\nBT /F1 12 Tf 100 700 Td (John Doe Senior Full Stack Engineer with 6 years experience) Tj ET\nendstream\nendobj\n5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\nxref\n0 6\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000244 00000 n \n0000000350 00000 n \ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n428\n%%EOF',
+      'utf-8'
+    );
+
+    const shortPdfBuffer = Buffer.from(
+      '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n4 0 obj\n<< /Length 15 >>\nstream\nBT /F1 12 Tf 100 700 Td (Short) Tj ET\nendstream\nendobj\n5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\nxref\n0 6\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000244 00000 n \n0000000310 00000 n \ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n388\n%%EOF',
+      'utf-8'
+    );
+
+    test('successfully extracts text from valid PDF and records resumeSource: "pdf"', async () => {
+      const { cookie, user } = await createTestUser();
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async () => ({
+            text: JSON.stringify(validAnalysisResult),
+          }),
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .field('targetRole', 'Cloud Infrastructure Engineer')
+        .attach('file', validPdfBuffer, 'resume.pdf');
+
+      assert.equal(res.status, 201);
+      assert.ok(res.body.analysis);
+      assert.equal(res.body.analysis.targetRole, 'Cloud Infrastructure Engineer');
+      assert.equal(res.body.analysis.resumeSource, 'pdf');
+      assert.equal(res.body.analysis.overallScore, 82);
+
+      // Verify DB persistence has resumeSource: 'pdf'
+      const savedDoc = await Analysis.findById(res.body.analysis.id);
+      assert.ok(savedDoc);
+      assert.equal(savedDoc.userId.toString(), user.id);
+      assert.equal(savedDoc.resumeSource, 'pdf');
+      assert.ok(savedDoc.resumeText.includes('John Doe Senior Full Stack Engineer'));
+    });
+
+    test('rejects non-PDF file upload with 400 INVALID_FILE_TYPE', async () => {
+      const { cookie } = await createTestUser();
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .field('targetRole', 'Backend Developer')
+        .attach('file', Buffer.from('plain text resume'), 'resume.txt');
+
+      assert.equal(res.status, 400);
+      assert.equal(res.body.error.code, 'INVALID_FILE_TYPE');
+    });
+
+    test('rejects file disguised as .pdf but missing %PDF magic bytes with 400 INVALID_FILE_TYPE', async () => {
+      const { cookie } = await createTestUser();
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .field('targetRole', 'Backend Developer')
+        .attach('file', Buffer.from('fake pdf content without magic bytes'), 'fake.pdf');
+
+      assert.equal(res.status, 400);
+      assert.equal(res.body.error.code, 'INVALID_FILE_TYPE');
+      assert.ok(res.body.error.message.includes('%PDF signature'));
+    });
+
+    test('rejects oversized file exceeding 5MB limit with 400 FILE_TOO_LARGE', async () => {
+      const { cookie } = await createTestUser();
+      const oversizedBuffer = Buffer.alloc(5.1 * 1024 * 1024);
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .field('targetRole', 'Backend Developer')
+        .attach('file', oversizedBuffer, 'oversized.pdf');
+
+      assert.equal(res.status, 400);
+      assert.equal(res.body.error.code, 'FILE_TOO_LARGE');
+    });
+
+    test('rejects empty or scanned PDF containing less than 50 characters with 422 EMPTY_OR_SCANNED_PDF', async () => {
+      const { cookie } = await createTestUser();
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .field('targetRole', 'Backend Developer')
+        .attach('file', shortPdfBuffer, 'short.pdf');
+
+      assert.equal(res.status, 422);
+      assert.equal(res.body.error.code, 'EMPTY_OR_SCANNED_PDF');
+      assert.ok(res.body.error.message.includes('paste your resume text instead'));
+    });
+  });
+
   describe('GET /api/analyses (History, Filters & Pagination)', () => {
     test('enforces user isolation: User B cannot see User A analyses', async () => {
       const userA = await createTestUser('usera@example.com', 'User A');
