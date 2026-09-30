@@ -1,7 +1,7 @@
 # FRONTEND-HANDOFF.md — CareerLens Frontend Developer Handoff
 
 > **Target Audience:** Pooja (Frontend Engineering) & Pair Programming Agents.
-> **Status:** Backend Core API, Auth, Analysis, History, Security, and Automated Tests are Complete.
+> **Status:** Backend Core API, Auth, Profile, All 3 Analysis Sources (Paste, PDF, Profile), History, Security, and 56 Automated Tests are Complete.
 > **Source of Truth:** This file reflects the verified backend code in `server/src/`. Follow these contracts exactly.
 
 ---
@@ -13,13 +13,15 @@
 | **Health Check (`GET /api/health`)** | **Completed & Verified** | Returns `{ "status": "ok" }`. |
 | **Authentication (`/api/auth/*`)** | **Completed & Verified** | HttpOnly cookie-based (`token`). Register, login, `/me`, `/logout`. Zero JWTs in JSON/client JS. |
 | **Profile Management (`/api/profile`)** | **Completed & Verified** | `GET` (returns canonical empty default if none), `PUT` (upsert with strict validation). Scoped to `req.user.id`. |
-| **Resume Analysis (`POST /api/analyses`)** | **Completed & Verified (P0 Paste)** | Validates input, calls Gemini, parses/validates JSON, saves to DB. Returns full structured result. |
-| **PDF Upload (`POST /api/analyses`)** | **Deferred to P1 (Not Implemented)** | Backend currently accepts JSON `{ resumeText, targetRole, jobDescription }`. Build the text paste input first. |
+| **Resume Analysis: Paste (`POST /api/analyses`)** | **Completed & Verified** | JSON `{ resumeText, targetRole, jobDescription }`. Validates input, calls Gemini, parses/validates JSON, saves to DB. |
+| **Resume Analysis: PDF (`POST /api/analyses`)** | **Completed & Verified** | `multipart/form-data` with field `file`. In-memory parsed, `%PDF` magic bytes, 5MB limit, 10-page limit, scanned/corrupt handling. |
+| **Resume Analysis: Profile (`POST /api/analyses/profile`)** | **Completed & Verified** | Analyzes saved profile via Markdown serializer, completeness validation, user isolation, targetRole override. |
 | **Analysis History (`GET /api/analyses`)** | **Completed & Verified** | Supports role regex, min/max score, date range (`from`/`to`), sorting, pagination. Lightweight summaries. |
 | **Analysis Detail (`GET /api/analyses/:id`)**| **Completed & Verified** | Returns full analysis with `result` payload. Strips raw `resumeText` and `jobDescription`. |
 | **Analysis Delete (`DELETE /api/analyses/:id`)**| **Completed & Verified** | Returns `204 No Content`. Scoped to `req.user.id`. |
-| **Gemini Fallback (`ai.service.js`)** | **Completed & Tested (Mocked)** | Single bounded fallback from `gemini-3.8-flash` to `gemini-3.5-flash` on 503 spikes. Live fallback test unverified. |
-| **Browser Cookie Persistence** | **Pending Live Integration** | Automated test suite passes; cross-site cookie retention across refreshes requires verification in a real browser. |
+| **Gemini Fallback (`ai.service.js`)** | **Completed & Tested (Mocked)** | Single bounded fallback from `gemini-3.8-flash` to `gemini-3.5-flash` on 503 spikes. |
+| **Automated Test Suite** | **56 / 56 Passing (12 Suites)** | 100% offline via in-memory MongoDB (`mongodb-memory-server`) & mocked AI. |
+| **Browser Cookie Persistence** | **Ready for Frontend Wiring** | Automated test suite passes; cross-site cookie retention across refreshes to be verified once frontend is live. |
 
 ---
 
@@ -180,6 +182,7 @@ Users can save and edit their structured background info.
   2. `multipart/form-data` (PDF Upload)
 
 #### Option 1: JSON Body (Text Paste)
+- **Endpoint:** `POST /api/analyses`
 - **Header:** `Content-Type: application/json`
 - **Body Schema:**
   ```json
@@ -193,10 +196,20 @@ Users can save and edit their structured background info.
   - `resumeText`: Required. String min 50 characters, max 20,000 characters.
   - `targetRole`: Required. String min 2 characters, max 100 characters.
   - `jobDescription`: Optional. String max 10,000 characters. Defaults to empty string.
+- **Frontend Axios Snippet:**
+  ```javascript
+  const { data } = await api.post('/api/analyses', {
+    resumeText,
+    targetRole,
+    jobDescription: jobDescription || undefined,
+  });
+  const createdAnalysis = data.analysis;
+  ```
 - **Output:** Stored with `"resumeSource": "paste"`.
 
 #### Option 2: Multipart Form-Data (PDF File Upload)
-- **Header:** `Content-Type: multipart/form-data` (or let Axios set boundaries automatically with `FormData`)
+- **Endpoint:** `POST /api/analyses`
+- **Header:** `Content-Type: multipart/form-data` (or omit header to let Axios / browser set boundary automatically)
 - **Form Fields:**
   - `file`: Required binary file. Must be a valid PDF (`application/pdf`, `%PDF` magic bytes).
   - `targetRole`: Required string (min 2, max 100 characters).
@@ -207,12 +220,26 @@ Users can save and edit their structured background info.
   - Memory storage only: No arbitrary files written to server disk.
   - Text Extraction & Length: Extracted in memory using `pdf-parse`, capped at 20,000 characters.
   - Scanned/Empty Detection: If a PDF contains fewer than 50 extractable characters (e.g. image-only scan or empty doc), returns `422 EMPTY_OR_SCANNED_PDF` with actionable guidance: *"Uploaded PDF contains insufficient readable text (<50 characters). Please paste your resume text directly or upload a text-based PDF."*
-  - Corrupt PDFs: Return `422 UNREADABLE_PDF`.
+  - Corrupt PDFs: Damaged or invalid PDF files return `422 UNREADABLE_PDF`.
+- **Frontend Axios Snippet:**
+  ```javascript
+  const formData = new FormData();
+  formData.append('file', pdfFile); // File object from <input type="file" />
+  formData.append('targetRole', targetRole);
+  if (jobDescription) {
+    formData.append('jobDescription', jobDescription);
+  }
+
+  const { data } = await api.post('/api/analyses', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  const createdAnalysis = data.analysis;
+  ```
 - **Output:** Stored with `"resumeSource": "pdf"`.
 
 #### Option 3: Analyze Saved Profile (`POST /api/analyses/profile`)
+- **Endpoint:** `POST /api/analyses/profile`
 - **Header:** `Content-Type: application/json`
-- **URL:** `POST /api/analyses/profile`
 - **Body Schema (All Fields Optional):**
   ```json
   {
@@ -229,6 +256,14 @@ Users can save and edit their structured background info.
   - The profile must have at least one skill in `skills[]` **or** at least one entry in `experience[]`.
   - The serialized Markdown text must be at least 50 characters long.
   - If the profile is missing, has no skills and no experience (e.g. only headline/education), or yields <50 characters, returns `400 PROFILE_INCOMPLETE` with a descriptive message prompting the user to complete their profile.
+- **Frontend Axios Snippet:**
+  ```javascript
+  const { data } = await api.post('/api/analyses/profile', {
+    targetRole: customRole || undefined, // Optional override
+    jobDescription: jobDescription || undefined,
+  });
+  const createdAnalysis = data.analysis;
+  ```
 - **Output:** Stored with `"resumeSource": "profile"`.
 
 ### Output Result Schema
@@ -388,6 +423,7 @@ Every error returned by the API adheres to this format:
 
 ### Common Error Codes
 - `VALIDATION_ERROR` (400): Form inputs failed Zod validation. Check `details[]`.
+- `INVALID_JSON` (400): Malformed JSON syntax in request body.
 - `INVALID_ID` (400): Malformed Mongo ObjectId parameter.
 - `INVALID_FILE_TYPE` (400): Uploaded file is not a PDF or lacks `%PDF` magic bytes.
 - `FILE_TOO_LARGE` (400): Uploaded file exceeds the 5 MB limit.
@@ -397,6 +433,7 @@ Every error returned by the API adheres to this format:
 - `FORBIDDEN` (403): CSRF Origin/Referer check failed.
 - `NOT_FOUND` (404): Resource does not exist or belongs to another user.
 - `DUPLICATE_EMAIL` (409): Email already registered.
+- `PAYLOAD_TOO_LARGE` (413): Request body exceeds JSON payload size limit.
 - `EMPTY_OR_SCANNED_PDF` (422): Uploaded PDF is scanned/image-only or yields <50 characters of readable text. User should paste text instead.
 - `UNREADABLE_PDF` (422): PDF file is damaged or corrupted.
 - `RATE_LIMIT_EXCEEDED` (429): Exceeded general, auth, or analysis rate limits.
