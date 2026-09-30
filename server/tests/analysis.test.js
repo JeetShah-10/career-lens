@@ -17,6 +17,7 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
 
 const app = require('../src/app');
 const User = require('../src/models/User');
+const Profile = require('../src/models/Profile');
 const Analysis = require('../src/models/Analysis');
 const aiService = require('../src/services/ai.service');
 
@@ -115,6 +116,7 @@ describe('CareerLens Analysis & History Integration Test Suite', () => {
 
   beforeEach(async () => {
     await User.deleteMany({});
+    await Profile.deleteMany({});
     await Analysis.deleteMany({});
   });
 
@@ -338,6 +340,43 @@ describe('CareerLens Analysis & History Integration Test Suite', () => {
       'utf-8'
     );
 
+    const corruptPdfBuffer = Buffer.from(
+      '%PDF-1.4\n<< /Corrupted /Stream /Malformed >>\nstream\n%%InvalidContent%%%\nendstream\nstartxref\n999\n%%EOF',
+      'utf-8'
+    );
+
+    function createSyntheticMultiPagePdf(pageCount) {
+      let objects = [];
+      let kids = [];
+      const fontObjId = pageCount * 2 + 3;
+      for (let i = 1; i <= pageCount; i++) {
+        const pageId = 2 + (i - 1) * 2 + 1;
+        kids.push(pageId + ' 0 R');
+      }
+      objects.push('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj');
+      objects.push('2 0 obj\n<< /Type /Pages /Kids [' + kids.join(' ') + '] /Count ' + pageCount + ' >>\nendobj');
+      for (let i = 1; i <= pageCount; i++) {
+        const pageId = 2 + (i - 1) * 2 + 1;
+        const contentId = pageId + 1;
+        objects.push(pageId + ' 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ' + contentId + ' 0 R /Resources << /Font << /F1 ' + fontObjId + ' 0 R >> >> >>\nendobj');
+        const text = 'BT /F1 12 Tf 100 700 Td (Page ' + i + ' Content of candidate resume experience) Tj ET';
+        objects.push(contentId + ' 0 obj\n<< /Length ' + text.length + ' >>\nstream\n' + text + '\nendstream\nendobj');
+      }
+      objects.push(fontObjId + ' 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj');
+
+      let body = '%PDF-1.4\n';
+      let xref = ['xref', '0 ' + (objects.length + 1), '0000000000 65535 f '];
+      for (let i = 0; i < objects.length; i++) {
+        let offset = Buffer.byteLength(body, 'utf-8');
+        xref.push(String(offset).padStart(10, '0') + ' 00000 n ');
+        body += objects[i] + '\n';
+      }
+      let startxref = Buffer.byteLength(body, 'utf-8');
+      body += xref.join('\n') + '\n';
+      body += 'trailer\n<< /Size ' + (objects.length + 1) + ' /Root 1 0 R >>\nstartxref\n' + startxref + '\n%%EOF';
+      return Buffer.from(body, 'utf-8');
+    }
+
     test('successfully extracts text from valid PDF and records resumeSource: "pdf"', async () => {
       const { cookie, user } = await createTestUser();
 
@@ -370,8 +409,17 @@ describe('CareerLens Analysis & History Integration Test Suite', () => {
       assert.ok(savedDoc.resumeText.includes('John Doe Senior Full Stack Engineer'));
     });
 
-    test('rejects non-PDF file upload with 400 INVALID_FILE_TYPE', async () => {
+    test('rejects non-PDF file upload with 400 INVALID_FILE_TYPE and does not call AI or persist record', async () => {
       const { cookie } = await createTestUser();
+      let aiCalled = false;
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async () => {
+            aiCalled = true;
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
 
       const res = await request(app)
         .post('/api/analyses')
@@ -382,10 +430,22 @@ describe('CareerLens Analysis & History Integration Test Suite', () => {
 
       assert.equal(res.status, 400);
       assert.equal(res.body.error.code, 'INVALID_FILE_TYPE');
+      assert.equal(aiCalled, false);
+      const count = await Analysis.countDocuments({});
+      assert.equal(count, 0);
     });
 
-    test('rejects file disguised as .pdf but missing %PDF magic bytes with 400 INVALID_FILE_TYPE', async () => {
+    test('rejects file disguised as .pdf but missing %PDF magic bytes with 400 INVALID_FILE_TYPE and does not call AI or persist record', async () => {
       const { cookie } = await createTestUser();
+      let aiCalled = false;
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async () => {
+            aiCalled = true;
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
 
       const res = await request(app)
         .post('/api/analyses')
@@ -397,10 +457,22 @@ describe('CareerLens Analysis & History Integration Test Suite', () => {
       assert.equal(res.status, 400);
       assert.equal(res.body.error.code, 'INVALID_FILE_TYPE');
       assert.ok(res.body.error.message.includes('%PDF signature'));
+      assert.equal(aiCalled, false);
+      const count = await Analysis.countDocuments({});
+      assert.equal(count, 0);
     });
 
-    test('rejects oversized file exceeding 5MB limit with 400 FILE_TOO_LARGE', async () => {
+    test('rejects oversized file exceeding 5MB limit with 400 FILE_TOO_LARGE and does not call AI or persist record', async () => {
       const { cookie } = await createTestUser();
+      let aiCalled = false;
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async () => {
+            aiCalled = true;
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
       const oversizedBuffer = Buffer.alloc(5.1 * 1024 * 1024);
 
       const res = await request(app)
@@ -412,10 +484,22 @@ describe('CareerLens Analysis & History Integration Test Suite', () => {
 
       assert.equal(res.status, 400);
       assert.equal(res.body.error.code, 'FILE_TOO_LARGE');
+      assert.equal(aiCalled, false);
+      const count = await Analysis.countDocuments({});
+      assert.equal(count, 0);
     });
 
-    test('rejects empty or scanned PDF containing less than 50 characters with 422 EMPTY_OR_SCANNED_PDF', async () => {
+    test('rejects empty or scanned PDF containing less than 50 characters with 422 EMPTY_OR_SCANNED_PDF and does not call AI or persist record', async () => {
       const { cookie } = await createTestUser();
+      let aiCalled = false;
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async () => {
+            aiCalled = true;
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
 
       const res = await request(app)
         .post('/api/analyses')
@@ -427,6 +511,336 @@ describe('CareerLens Analysis & History Integration Test Suite', () => {
       assert.equal(res.status, 422);
       assert.equal(res.body.error.code, 'EMPTY_OR_SCANNED_PDF');
       assert.ok(res.body.error.message.includes('paste your resume text instead'));
+      assert.equal(aiCalled, false);
+      const count = await Analysis.countDocuments({});
+      assert.equal(count, 0);
+    });
+
+    test('rejects corrupt PDF with valid %PDF signature with 422 UNREADABLE_PDF and does not call AI or persist record', async () => {
+      const { cookie } = await createTestUser();
+      let aiCalled = false;
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async () => {
+            aiCalled = true;
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .field('targetRole', 'Backend Developer')
+        .attach('file', corruptPdfBuffer, 'corrupt.pdf');
+
+      assert.equal(res.status, 422);
+      assert.equal(res.body.error.code, 'UNREADABLE_PDF');
+      assert.ok(res.body.error.message.includes('corrupted, encrypted, or password-protected'));
+      assert.equal(aiCalled, false);
+      const count = await Analysis.countDocuments({});
+      assert.equal(count, 0);
+    });
+
+    test('rejects PDF exceeding 10-page limit with 400 PAGE_LIMIT_EXCEEDED and does not call AI or persist record', async () => {
+      const { cookie } = await createTestUser();
+      let aiCalled = false;
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async () => {
+            aiCalled = true;
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
+      const elevenPagePdfBuffer = createSyntheticMultiPagePdf(11);
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .field('targetRole', 'Backend Developer')
+        .attach('file', elevenPagePdfBuffer, 'eleven_pages.pdf');
+
+      assert.equal(res.status, 400);
+      assert.equal(res.body.error.code, 'PAGE_LIMIT_EXCEEDED');
+      assert.ok(res.body.error.message.includes('maximum limit of 10 pages'));
+      assert.equal(aiCalled, false);
+      const count = await Analysis.countDocuments({});
+      assert.equal(count, 0);
+    });
+  });
+
+  describe('POST /api/analyses/profile (Analyze My Profile Support)', () => {
+    test('successfully analyzes saved profile using profile.targetRole and records resumeSource: "profile"', async () => {
+      const { cookie, user } = await createTestUser();
+
+      // Seed valid profile
+      await Profile.create({
+        userId: user.id,
+        headline: 'Lead Cloud Architect',
+        targetRole: 'Cloud Solutions Architect',
+        skills: ['AWS', 'Kubernetes', 'Terraform', 'Node.js'],
+        experience: [
+          {
+            company: 'Cloud Corp',
+            role: 'Senior Architect',
+            duration: '2021-Present',
+            description: 'Designed multi-region Kubernetes clusters with zero downtime.',
+          },
+        ],
+        education: [
+          {
+            institution: 'Tech University',
+            degree: 'M.S. Software Engineering',
+            year: '2020',
+          },
+        ],
+      });
+
+      let aiCalled = false;
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async () => {
+            aiCalled = true;
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses/profile')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({});
+
+      assert.equal(res.status, 201);
+      assert.equal(aiCalled, true);
+      assert.ok(res.body.analysis);
+      assert.equal(res.body.analysis.targetRole, 'Cloud Solutions Architect');
+      assert.equal(res.body.analysis.resumeSource, 'profile');
+      assert.equal(res.body.analysis.overallScore, 82);
+      assert.equal(res.body.analysis.resumeText, undefined);
+      assert.equal(res.body.analysis.jobDescription, undefined);
+
+      // Verify DB persistence
+      const savedDoc = await Analysis.findById(res.body.analysis.id);
+      assert.ok(savedDoc);
+      assert.equal(savedDoc.userId.toString(), user.id);
+      assert.equal(savedDoc.resumeSource, 'profile');
+      assert.ok(savedDoc.resumeText.includes('Lead Cloud Architect'));
+      assert.ok(savedDoc.resumeText.includes('Kubernetes'));
+    });
+
+    test('overrides targetRole for analysis without mutating saved profile', async () => {
+      const { cookie, user } = await createTestUser();
+
+      await Profile.create({
+        userId: user.id,
+        headline: 'Full Stack Engineer',
+        targetRole: 'Full Stack Engineer',
+        skills: ['React', 'Node.js'],
+        experience: [
+          {
+            company: 'Startup Inc',
+            role: 'Full Stack Engineer',
+            duration: '2022-Present',
+            description: 'Built full stack web application features.',
+          },
+        ],
+      });
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async () => ({
+            text: JSON.stringify(validAnalysisResult),
+          }),
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses/profile')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({ targetRole: 'VP of Engineering' });
+
+      assert.equal(res.status, 201);
+      assert.equal(res.body.analysis.targetRole, 'VP of Engineering');
+
+      // Crucial: verify saved profile was NOT mutated by the override
+      const savedProfile = await Profile.findOne({ userId: user.id });
+      assert.equal(savedProfile.targetRole, 'Full Stack Engineer');
+    });
+
+    test('enforces strict ownership: User A analysis analyzes User A profile, not User B profile', async () => {
+      const userA = await createTestUser('alice@example.com', 'Alice Smith');
+      const userB = await createTestUser('bob@example.com', 'Bob Jones');
+
+      // Profile A
+      await Profile.create({
+        userId: userA.user.id,
+        headline: 'Alpha Specialist',
+        targetRole: 'Alpha Lead',
+        skills: ['SkillAlphaOne', 'SkillAlphaTwo'],
+        experience: [
+          {
+            company: 'AlphaCorp',
+            role: 'Alpha Engineer',
+            duration: '2020-2023',
+            description: 'Alpha proprietary systems development and deployment.',
+          },
+        ],
+      });
+
+      // Profile B
+      await Profile.create({
+        userId: userB.user.id,
+        headline: 'Beta Specialist',
+        targetRole: 'Beta Lead',
+        skills: ['SkillBetaOne', 'SkillBetaTwo'],
+        experience: [
+          {
+            company: 'BetaCorp',
+            role: 'Beta Engineer',
+            duration: '2021-2024',
+            description: 'Beta proprietary systems development and deployment.',
+          },
+        ],
+      });
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async () => ({
+            text: JSON.stringify(validAnalysisResult),
+          }),
+        },
+      });
+
+      // User A runs analysis from profile
+      const res = await request(app)
+        .post('/api/analyses/profile')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', userA.cookie)
+        .send({});
+
+      assert.equal(res.status, 201);
+
+      // Verify DB record strictly belongs to User A and contains only User A's data
+      const savedDoc = await Analysis.findById(res.body.analysis.id);
+      assert.equal(savedDoc.userId.toString(), userA.user.id);
+      assert.ok(savedDoc.resumeText.includes('Alpha Specialist'));
+      assert.ok(savedDoc.resumeText.includes('SkillAlphaOne'));
+      assert.equal(savedDoc.resumeText.includes('Beta Specialist'), false);
+      assert.equal(savedDoc.resumeText.includes('SkillBetaOne'), false);
+    });
+
+    test('rejects with 400 PROFILE_INCOMPLETE when user has no saved profile', async () => {
+      const { cookie } = await createTestUser();
+      let aiCalled = false;
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async () => {
+            aiCalled = true;
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses/profile')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({});
+
+      assert.equal(res.status, 400);
+      assert.equal(res.body.error.code, 'PROFILE_INCOMPLETE');
+      assert.equal(aiCalled, false);
+      const count = await Analysis.countDocuments({});
+      assert.equal(count, 0);
+    });
+
+    test('rejects with 400 PROFILE_INCOMPLETE when profile has no skills and no experience', async () => {
+      const { cookie, user } = await createTestUser();
+      let aiCalled = false;
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async () => {
+            aiCalled = true;
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
+
+      // Profile has headline and education, but ZERO skills and ZERO experience
+      await Profile.create({
+        userId: user.id,
+        headline: 'Student aspiring to be a developer',
+        targetRole: 'Junior Developer',
+        skills: [],
+        experience: [],
+        education: [
+          {
+            institution: 'State University',
+            degree: 'B.S. in Computer Science',
+            year: '2024',
+          },
+        ],
+      });
+
+      const res = await request(app)
+        .post('/api/analyses/profile')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({});
+
+      assert.equal(res.status, 400);
+      assert.equal(res.body.error.code, 'PROFILE_INCOMPLETE');
+      assert.ok(res.body.error.message.includes('skill or work experience'));
+      assert.equal(aiCalled, false);
+      const count = await Analysis.countDocuments({});
+      assert.equal(count, 0);
+    });
+
+    test('rejects with 400 VALIDATION_ERROR when neither request body nor profile specifies a targetRole', async () => {
+      const { cookie, user } = await createTestUser();
+      let aiCalled = false;
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async () => {
+            aiCalled = true;
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
+
+      // Profile has skills and experience, but empty targetRole
+      await Profile.create({
+        userId: user.id,
+        headline: 'Software Engineer',
+        targetRole: '',
+        skills: ['JavaScript', 'Node.js', 'React'],
+        experience: [
+          {
+            company: 'Tech Co',
+            role: 'Developer',
+            duration: '2 years',
+            description: 'Building web applications and REST APIs.',
+          },
+        ],
+      });
+
+      const res = await request(app)
+        .post('/api/analyses/profile')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({});
+
+      assert.equal(res.status, 400);
+      assert.equal(res.body.error.code, 'VALIDATION_ERROR');
+      assert.equal(aiCalled, false);
+      const count = await Analysis.countDocuments({});
+      assert.equal(count, 0);
     });
   });
 

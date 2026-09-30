@@ -14,6 +14,9 @@ function isValidPdfSignature(buffer) {
   return buffer.slice(0, 4).toString('ascii') === '%PDF';
 }
 
+const MAX_PAGE_COUNT = 10;
+const MAX_EXTRACTED_CHARS = 20000;
+
 /**
  * Extracts and sanitizes plain text from a PDF Buffer.
  *
@@ -29,16 +32,19 @@ async function extractTextFromPdf(buffer) {
   }
 
   let rawText = '';
+  let pageCount = 0;
   try {
     if (pdfParse && pdfParse.PDFParse) {
       const parser = new pdfParse.PDFParse({ data: buffer });
-      const result = await parser.getText();
+      const result = await parser.getText({ first: MAX_PAGE_COUNT });
+      pageCount = result && typeof result.total === 'number' ? result.total : 0;
       rawText = result && typeof result.text === 'string' ? result.text : '';
       if (typeof parser.destroy === 'function') {
         await parser.destroy().catch(() => {});
       }
     } else if (typeof pdfParse === 'function') {
-      const pdfData = await pdfParse(buffer, { max: 10 });
+      const pdfData = await pdfParse(buffer, { max: MAX_PAGE_COUNT });
+      pageCount = pdfData && typeof pdfData.numpages === 'number' ? pdfData.numpages : 0;
       rawText = pdfData && typeof pdfData.text === 'string' ? pdfData.text : '';
     } else {
       throw new Error('PDF parsing engine is not available');
@@ -50,6 +56,16 @@ async function extractTextFromPdf(buffer) {
     );
     error.code = 'UNREADABLE_PDF';
     error.status = 422;
+    throw error;
+  }
+
+  // Reject PDFs that exceed the maximum page limit
+  if (pageCount > MAX_PAGE_COUNT) {
+    const error = new Error(
+      `PDF exceeds the maximum limit of ${MAX_PAGE_COUNT} pages. Please upload a resume with ${MAX_PAGE_COUNT} or fewer pages or paste your resume text.`
+    );
+    error.code = 'PAGE_LIMIT_EXCEEDED';
+    error.status = 400;
     throw error;
   }
 
@@ -70,7 +86,7 @@ async function extractTextFromPdf(buffer) {
   }
 
   // Truncate to maximum allowable resume length
-  return cleanedText.slice(0, 20000);
+  return cleanedText.slice(0, MAX_EXTRACTED_CHARS);
 }
 
 module.exports = {

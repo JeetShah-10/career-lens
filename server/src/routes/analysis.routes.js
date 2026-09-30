@@ -4,12 +4,14 @@ const auth = require('../middleware/auth');
 const validate = require('../middleware/validate');
 const {
   createAnalysis,
+  analyzeProfile,
   getAnalyses,
   getAnalysisById,
   deleteAnalysis,
 } = require('../controllers/analysis.controller');
 const {
   createAnalysisSchema,
+  analyzeProfileSchema,
   queryAnalysesSchema,
 } = require('../validators/analysis.validator');
 const logger = require('../utils/logger');
@@ -54,6 +56,14 @@ router.post(
   processResumeInput,
   validate(createAnalysisSchema),
   createAnalysis
+);
+
+// POST /api/analyses/profile - create a new resume analysis from saved profile
+router.post(
+  '/profile',
+  analysisCreateLimiter,
+  validate(analyzeProfileSchema),
+  analyzeProfile
 );
 
 // GET /api/analyses - list analyses with pagination and filters

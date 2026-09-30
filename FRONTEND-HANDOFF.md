@@ -203,11 +203,33 @@ Users can save and edit their structured background info.
   - `jobDescription`: Optional string (max 10,000 characters).
 - **Backend File Limits & Safety:**
   - Max size: **5 MB**. Files exceeding this return `400 FILE_TOO_LARGE`.
+  - Page limit: **10 pages maximum**. PDFs exceeding 10 pages return `400 PAGE_LIMIT_EXCEEDED`.
   - Memory storage only: No arbitrary files written to server disk.
-  - Text Extraction: Extracted in memory using `pdf-parse`.
+  - Text Extraction & Length: Extracted in memory using `pdf-parse`, capped at 20,000 characters.
   - Scanned/Empty Detection: If a PDF contains fewer than 50 extractable characters (e.g. image-only scan or empty doc), returns `422 EMPTY_OR_SCANNED_PDF` with actionable guidance: *"Uploaded PDF contains insufficient readable text (<50 characters). Please paste your resume text directly or upload a text-based PDF."*
   - Corrupt PDFs: Return `422 UNREADABLE_PDF`.
 - **Output:** Stored with `"resumeSource": "pdf"`.
+
+#### Option 3: Analyze Saved Profile (`POST /api/analyses/profile`)
+- **Header:** `Content-Type: application/json`
+- **URL:** `POST /api/analyses/profile`
+- **Body Schema (All Fields Optional):**
+  ```json
+  {
+    "targetRole": "Senior Full Stack Engineer",
+    "jobDescription": "Optional target job description to calculate keyword match..."
+  }
+  ```
+- **Target Role Resolution:**
+  - If `targetRole` is provided in the body, it is used for this analysis.
+  - If `targetRole` is omitted, the backend falls back to the saved `profile.targetRole`.
+  - **Important:** Supplying a `targetRole` override in this request applies **only to this analysis**; it does not mutate or overwrite the user's saved profile in the database.
+  - If neither the request body nor the saved profile has a target role (or length < 2), returns `400 VALIDATION_ERROR`.
+- **Profile Completeness Requirements:**
+  - The profile must have at least one skill in `skills[]` **or** at least one entry in `experience[]`.
+  - The serialized Markdown text must be at least 50 characters long.
+  - If the profile is missing, has no skills and no experience (e.g. only headline/education), or yields <50 characters, returns `400 PROFILE_INCOMPLETE` with a descriptive message prompting the user to complete their profile.
+- **Output:** Stored with `"resumeSource": "profile"`.
 
 ### Output Result Schema
 - **Success (`201 Created`):**
@@ -369,6 +391,8 @@ Every error returned by the API adheres to this format:
 - `INVALID_ID` (400): Malformed Mongo ObjectId parameter.
 - `INVALID_FILE_TYPE` (400): Uploaded file is not a PDF or lacks `%PDF` magic bytes.
 - `FILE_TOO_LARGE` (400): Uploaded file exceeds the 5 MB limit.
+- `PAGE_LIMIT_EXCEEDED` (400): Uploaded PDF exceeds the 10-page limit.
+- `PROFILE_INCOMPLETE` (400): Profile lacks mandatory skills or work experience, or yields <50 characters of text.
 - `UNAUTHORIZED` (401): Missing, invalid, or expired cookie.
 - `FORBIDDEN` (403): CSRF Origin/Referer check failed.
 - `NOT_FOUND` (404): Resource does not exist or belongs to another user.
@@ -394,12 +418,12 @@ Every error returned by the API adheres to this format:
 ### Phase 2: Profile & Analysis Core Flow
 - [ ] Build **Profile Screen** (`GET /api/profile` and `PUT /api/profile`) with empty default handling.
 - [ ] Build **New Analysis Form** (`POST /api/analyses`) supporting:
-  - Toggle between **Paste Resume Text** and **Upload PDF Resume** (drag & drop or file picker, max 5MB).
+  - Toggle between **Paste Resume Text**, **Upload PDF Resume** (drag & drop or file picker, max 5MB), and **Analyze My Profile** (`POST /api/analyses/profile`).
   - Textarea for resume text (min 50, max 20,000 chars with live counter).
-  - Target role input (min 2, max 100 chars).
+  - Target role input (min 2, max 100 chars, pre-filled from profile when using "Analyze My Profile").
   - Optional job description textarea.
   - Loading spinner / animated progress states during the 5–15s AI analysis call.
-  - Clear user guidance for `EMPTY_OR_SCANNED_PDF` (prompting fallback to paste).
+  - Clear user guidance for `EMPTY_OR_SCANNED_PDF` and `PROFILE_INCOMPLETE`.
 - [ ] Build **Results Page** rendering:
   - Overall score badge and score breakdown bars (`skills`, `experience`, `formatting`, `impact`).
   - Executive summary and strengths/weaknesses tags.

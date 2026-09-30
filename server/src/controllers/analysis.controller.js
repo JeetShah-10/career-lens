@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
 const Analysis = require('../models/Analysis');
+const Profile = require('../models/Profile');
 const aiService = require('../services/ai.service');
+const { serializeProfileToText } = require('../services/profileSerializer.service');
 const { asyncHandler, AppError, NotFoundError } = require('../utils/errors');
 const logger = require('../utils/logger');
 
@@ -41,6 +43,89 @@ const createAnalysis = asyncHandler(async (req, res) => {
     userId: req.user.id,
     analysisId: analysis.id,
     targetRole,
+    overallScore: result.overallScore,
+  });
+
+  return res.status(201).json({
+    analysis,
+  });
+});
+
+/**
+ * Create and persist an analysis derived from the user's saved Profile.
+ * POST /api/analyses/profile
+ */
+const analyzeProfile = asyncHandler(async (req, res) => {
+  const { targetRole: bodyTargetRole, jobDescription } = req.validated.body || {};
+
+  // Fetch saved profile strictly scoped to authenticated user
+  const profile = await Profile.findOne({ userId: req.user.id });
+
+  if (!profile) {
+    throw new AppError(
+      'Your profile is incomplete. Please add skills or experience before running an analysis.',
+      400,
+      'PROFILE_INCOMPLETE'
+    );
+  }
+
+  // Check mandatory requirements: must have at least 1 skill OR at least 1 experience item
+  const hasSkills = Array.isArray(profile.skills) && profile.skills.some((s) => typeof s === 'string' && s.trim());
+  const hasExperience = Array.isArray(profile.experience) && profile.experience.length > 0;
+
+  if (!hasSkills && !hasExperience) {
+    throw new AppError(
+      'Your profile is incomplete. Please add at least one skill or work experience before running an analysis.',
+      400,
+      'PROFILE_INCOMPLETE'
+    );
+  }
+
+  // Target role resolution: body override takes precedence, fallback to saved profile
+  // Note: body override applies ONLY to this analysis and does not mutate the saved profile
+  const resolvedTargetRole = (bodyTargetRole || profile.targetRole || '').trim();
+  if (!resolvedTargetRole || resolvedTargetRole.length < 2) {
+    throw new AppError(
+      'Target role is required. Please specify a target role or save one in your profile.',
+      400,
+      'VALIDATION_ERROR',
+      [{ field: 'targetRole', message: 'Target role is required and must be at least 2 characters' }]
+    );
+  }
+
+  // Serialize profile to clean Markdown resume text
+  const resumeText = serializeProfileToText(profile, req.user.name);
+
+  if (resumeText.length < 50) {
+    throw new AppError(
+      'Your profile is incomplete. Please add more details to your skills or experience before running an analysis.',
+      400,
+      'PROFILE_INCOMPLETE'
+    );
+  }
+
+  // Run AI analysis
+  const result = await aiService.analyzeResume({
+    resumeText,
+    targetRole: resolvedTargetRole,
+    jobDescription: jobDescription || '',
+  });
+
+  // Persist analysis strictly bound to verified user
+  const analysis = await Analysis.create({
+    userId: req.user.id,
+    resumeText,
+    resumeSource: 'profile',
+    targetRole: resolvedTargetRole,
+    jobDescription: jobDescription || '',
+    overallScore: result.overallScore,
+    result,
+  });
+
+  logger.info('Profile analysis created successfully', {
+    userId: req.user.id,
+    analysisId: analysis.id,
+    targetRole: resolvedTargetRole,
     overallScore: result.overallScore,
   });
 
@@ -164,6 +249,7 @@ const deleteAnalysis = asyncHandler(async (req, res) => {
 
 module.exports = {
   createAnalysis,
+  analyzeProfile,
   getAnalyses,
   getAnalysisById,
   deleteAnalysis,

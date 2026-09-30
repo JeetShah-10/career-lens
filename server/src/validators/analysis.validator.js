@@ -94,8 +94,27 @@ const queryAnalysesSchema = z
   })
   .strict();
 
+// Request body validation schema for analyzing saved profile
+const analyzeProfileSchema = z
+  .object({
+    targetRole: z
+      .string()
+      .trim()
+      .min(2, 'Target role must be at least 2 characters')
+      .max(100, 'Target role must not exceed 100 characters')
+      .optional(),
+    jobDescription: z
+      .string()
+      .trim()
+      .max(10000, 'Job description must not exceed 10,000 characters')
+      .optional()
+      .default(''),
+  })
+  .strict();
+
 module.exports = {
   aiOutputSchema,
   createAnalysisSchema,
+  analyzeProfileSchema,
   queryAnalysesSchema,
 };
