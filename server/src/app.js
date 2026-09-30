@@ -4,6 +4,8 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const env = require('./config/env');
 const logger = require('./utils/logger');
+const cookieParser = require('cookie-parser');
+const csrfProtection = require('./middleware/csrf');
 const errorHandler = require('./middleware/errorHandler');
 const { NotFoundError } = require('./utils/errors');
 
@@ -17,7 +19,7 @@ if (env.NODE_ENV === 'production') {
 // 1. Security HTTP headers
 app.use(helmet());
 
-// 2. Strict CORS policy limited to CLIENT_ORIGIN
+// 2. Strict CORS policy limited to CLIENT_ORIGIN with credentials
 app.use(
   cors({
     origin: env.CLIENT_ORIGIN,
@@ -27,6 +29,12 @@ app.use(
 
 // 3. Request body parsing with strict size limits
 app.use(express.json({ limit: '100kb' }));
+
+// 4. Cookie parser for HttpOnly authentication cookies
+app.use(cookieParser());
+
+// 5. CSRF protection: Origin/Referer check on state-changing requests
+app.use(csrfProtection);
 
 // 4. Global Rate Limiter: 100 requests per 15 minutes per IP
 const globalLimiter = rateLimit({
@@ -64,6 +72,10 @@ app.use('/api/auth', authRoutes);
 
 // 7. Profile routes
 app.use('/api/profile', profileRoutes);
+
+// 8. Analysis routes
+const analysisRoutes = require('./routes/analysis.routes');
+app.use('/api/analyses', analysisRoutes);
 
 // 8. Unknown routes fall through to NotFoundError (404)
 app.use((req, res, next) => {

@@ -61,9 +61,11 @@ If this loop works end-to-end and is deployed, the baseline is won. Everything e
 Each row is something the judges can check. "Done when" is the acceptance test.
 
 ### 3.1 Authentication
-- **Meaning:** Users sign up, log in, log out, and can only see their own data.
-- **Build:** `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`. Passwords hashed with bcrypt. JWT for sessions. Protected routes on both backend and frontend.
-- **Done when:** An unauthenticated request to any non-auth API route returns 401. A logged-out user visiting a protected page is redirected to login. Passwords are never stored or returned in plain text.
+- **Meaning:** Users sign up, stay signed in across refreshes via protected HttpOnly cookies, sign out via a visible sign-out action, and can only see their own data.
+- **Build:** `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`. Passwords hashed with bcrypt. JWT stored in protected `HttpOnly` cookie (`token`), never returned in JSON or stored in JavaScript state/storage. Protected routes on both backend and frontend.
+- **Cookie & Session:** 1-day cookie lifetime matching JWT expiration. `HttpOnly`, `Path=/`, `Secure` in production, `SameSite=none` in cross-site production (or `lax` in local dev).
+- **Logout:** `POST /api/auth/logout` clears the browser cookie using matching attributes. Frontend provides a visible Sign out control in the user/profile menu that calls logout, resets client state, and navigates to login. Note: clearing the cookie terminates browser session; stateless JWTs cannot be revoked server-side without a persistent revocation table (out of scope for MVP).
+- **Done when:** An unauthenticated request to any non-auth API route returns 401. Successful register/login sets HttpOnly cookie and returns `{ user }` with no token in JSON. A logged-out user visiting a protected page is redirected to login. Passwords and tokens are never stored in client state, localStorage, or plain text.
 
 ### 3.2 Resume / profile management
 - **Meaning:** The user's data lives in the app, not just in a one-off upload. **Decision: both a structured profile and resume upload/paste.**
@@ -75,7 +77,7 @@ Each row is something the judges can check. "Done when" is the acceptance test.
 
 ### 3.3 AI API integration
 - **Meaning:** The backend sends resume text to an LLM and gets structured results back.
-- **Build:** One service file, `services/ai.service.js`, is the only place that talks to the AI provider. Use Google Gemini API as the primary provider with a stable Flash model selected via `GEMINI_MODEL`. Keep the provider call isolated in this service, but do not build multi-provider switching. Output uses native JSON-schema structured output where supported and must pass the Section 6 Zod schema.
+- **Build:** One service file, `services/ai.service.js`, is the only place that talks to the AI provider. Use Google Gemini API as the primary provider with a stable Flash model selected via `GEMINI_MODEL` (default `gemini-3.8-flash`). If the primary model experiences a transient 503 high-demand spike, the service executes a single, bounded fallback to `GEMINI_FALLBACK_MODEL` (`gemini-3.5-flash`). Both models enforce the identical Section 6 Zod schema. If the fallback also fails or quota is exhausted, it stops immediately and returns a clean 502 error; it never retries indefinitely.
 - **Done when:** A valid analysis request returns a result that passes schema validation. A malformed AI response triggers one retry and then a clean error, never a crash or a half-saved record.
 
 ### 3.3.1 AI rules (non-negotiable)
@@ -84,6 +86,7 @@ Each row is something the judges can check. "Done when" is the acceptance test.
 - Truncate resume text to a safe length before sending (e.g. 12,000 characters).
 - Rate-limit the analysis endpoint per user/IP.
 - Advice must be **grounded in the actual resume**. The prompt must tell the model to reference real content and never invent experience. Generic advice like "learn more tech" is a failure.
+- Privacy & data minimization: Raw resume text and job descriptions are never logged and never included in error responses or history listings.
 
 ### 3.4 Skill recommendations
 - **Meaning:** "Here are skills you're missing for your target role."
@@ -97,12 +100,12 @@ Each row is something the judges can check. "Done when" is the acceptance test.
 
 ### 3.6 Analysis history
 - **Meaning:** Past analyses are saved and viewable later.
-- **Build:** Every successful analysis is saved to the database with its full result. History page lists them (role, score, date). Clicking one opens the full result. Users can delete an analysis.
+- **Build:** Every successful analysis is saved to the database. History list endpoint (`GET /api/analyses`) returns concise summaries (`id`, `targetRole`, `resumeSource`, `overallScore`, `createdAt`, `updatedAt`), omitting heavy `result`, `resumeText`, and `jobDescription`. Clicking an analysis fetches full results via `GET /api/analyses/:id`. Users can delete an analysis (`DELETE /api/analyses/:id`).
 - **Done when:** Refreshing the browser or logging in on another device still shows past analyses. User A can never see user B's analyses.
 
 ### 3.7 Filters
 - **Meaning:** Narrow down the analysis history.
-- **Build:** `GET /api/analyses` supports `role` (text match), `minScore`, `maxScore`, `from`, `to` (dates), `sort` (`newest` | `oldest` | `score_desc` | `score_asc`), plus `page` and `limit`. The frontend has matching controls.
+- **Build:** `GET /api/analyses` supports `role` (case-insensitive substring with regex escaping), `minScore`, `maxScore`, `from`, `to` (ISO dates), `sort` (`newest` | `oldest` | `score_desc` | `score_asc`), plus `page` and `limit`. The frontend has matching controls.
 - **Done when:** Changing any filter changes the list, combined filters work together, and an empty result shows a clear "no results" state.
 
 ### 3.8 Secure backend
@@ -222,25 +225,26 @@ const AnalysisResult = z.object({
 
 **Profile** (one per user): `userId` (unique), `headline`, `targetRole`, `skills: [String]`, `education: [{ institution, degree, year }]`, `experience: [{ company, role, duration, description }]`, `updatedAt`
 
-**Analysis:** `userId` (indexed), `resumeText`, `resumeSource` (`"paste" | "pdf" | "profile"`), `targetRole` (indexed), `jobDescription?`, `overallScore` (indexed, denormalized from result for filtering), `result` (the full object from Section 6), `createdAt` (indexed)
+**Analysis:** `userId` (indexed), `resumeText` (stored in DB, stripped from JSON), `resumeSource` (`"paste" | "pdf" | "profile"`), `targetRole` (indexed), `jobDescription?` (stored in DB, stripped from JSON), `overallScore` (indexed, denormalized from result for filtering), `result` (the full object from Section 6), `createdAt` (indexed)
 
 ### Endpoints
 
 ```
-POST   /api/auth/register        { name, email, password }        -> 201 { token, user }
-POST   /api/auth/login           { email, password }              -> 200 { token, user }
-GET    /api/auth/me                                               -> 200 { user }
+POST   /api/auth/register        { name, email, password }        -> 201 { user }  (Sets HttpOnly cookie)
+POST   /api/auth/login           { email, password }              -> 200 { user }  (Sets HttpOnly cookie)
+POST   /api/auth/logout                                           -> 200 { message: "Logged out successfully" }  (Clears cookie)
+GET    /api/auth/me                                               -> 200 { user }  (Authenticates from cookie)
 
 GET    /api/profile                                               -> 200 { profile }   (empty default if none)
 PUT    /api/profile              { headline, targetRole, skills, education, experience } -> 200 { profile }
 
-POST   /api/analyses             multipart or JSON:
-                                 { source: "paste"|"pdf"|"profile", resumeText?, file?, targetRole, jobDescription? }
-                                                                  -> 201 { analysis }
+POST   /api/analyses             JSON: { resumeText, targetRole, jobDescription? } (or multipart for PDF)
+                                 -> 201 { analysis }  (returns full result; resumeText/jobDescription omitted)
 GET    /api/analyses             ?role=&minScore=&maxScore=&from=&to=&sort=&page=&limit=
-                                                                  -> 200 { items, total, page, pages }
-GET    /api/analyses/:id                                          -> 200 { analysis }
-DELETE /api/analyses/:id                                          -> 204
+                                 -> 200 { items, total, page, pages }
+                                 (items contain summary fields: id, targetRole, resumeSource, overallScore, createdAt, updatedAt; result & raw text excluded)
+GET    /api/analyses/:id         -> 200 { analysis }  (returns full result; resumeText/jobDescription omitted)
+DELETE /api/analyses/:id         -> 204
 ```
 
 ### Error shape (every error, everywhere)

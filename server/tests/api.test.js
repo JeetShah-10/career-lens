@@ -18,10 +18,11 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
 const app = require('../src/app');
 const User = require('../src/models/User');
 const Profile = require('../src/models/Profile');
+const { AUTH_COOKIE_NAME } = require('../src/utils/cookies');
 
 let mongoServer;
 
-describe('CareerLens API Integration Test Suite', () => {
+describe('CareerLens API Integration Test Suite (Cookie Authentication)', () => {
   before(async () => {
     try {
       // In-memory MongoDB instance exclusively. Never fall back to any external or configured database.
@@ -56,6 +57,13 @@ describe('CareerLens API Integration Test Suite', () => {
     await Profile.deleteMany({});
   });
 
+  // Helper to extract cookie from set-cookie header array
+  function getCookieHeader(res) {
+    const rawCookies = res.headers['set-cookie'];
+    if (!rawCookies) return null;
+    return Array.isArray(rawCookies) ? rawCookies : [rawCookies];
+  }
+
   // 1. Health Route
   describe('GET /api/health', () => {
     test('returns 200 with status ok', async () => {
@@ -65,9 +73,9 @@ describe('CareerLens API Integration Test Suite', () => {
     });
   });
 
-  // 2. Authentication Routes
+  // 2. Authentication Routes (Cookie-based)
   describe('/api/auth', () => {
-    test('POST /register - successfully registers user and returns token and user without passwordHash', async () => {
+    test('POST /register - successfully registers user, sets HttpOnly cookie, and returns user without token in JSON', async () => {
       const res = await request(app)
         .post('/api/auth/register')
         .send({
@@ -77,14 +85,21 @@ describe('CareerLens API Integration Test Suite', () => {
         });
 
       assert.equal(res.status, 201);
-      assert.ok(res.body.token, 'Expected token to be returned');
-      assert.equal(typeof res.body.token, 'string');
+      // Token must NEVER be returned in JSON
+      assert.equal(res.body.token, undefined, 'JWT must not be in response body');
       assert.ok(res.body.user);
       assert.equal(res.body.user.name, 'Jane Doe');
       assert.equal(res.body.user.email, 'jane@example.com');
       assert.ok(res.body.user.id);
       assert.equal(res.body.user.passwordHash, undefined, 'passwordHash must never be returned');
-      assert.equal(res.body.password, undefined);
+
+      // Verify Set-Cookie header
+      const cookies = getCookieHeader(res);
+      assert.ok(cookies, 'Expected Set-Cookie header');
+      const authCookie = cookies.find((c) => c.startsWith(`${AUTH_COOKIE_NAME}=`));
+      assert.ok(authCookie, 'Expected auth token cookie to be set');
+      assert.ok(authCookie.includes('HttpOnly'), 'Cookie must have HttpOnly flag');
+      assert.ok(authCookie.includes('Path=/'), 'Cookie must have Path=/');
     });
 
     test('POST /register - rejects duplicate email with 409 DUPLICATE_EMAIL', async () => {
@@ -134,14 +149,13 @@ describe('CareerLens API Integration Test Suite', () => {
       const serialized = JSON.stringify(res.body);
       assert.ok(!serialized.includes(sensitivePassword), 'Submitted password must not be exposed in validation error details');
 
-      // Verify safe detail shape
       for (const item of res.body.error.details) {
         assert.ok(typeof item.field === 'string');
         assert.ok(typeof item.message === 'string');
       }
     });
 
-    test('POST /login - succeeds with correct credentials', async () => {
+    test('POST /login - succeeds with correct credentials, sets HttpOnly cookie, and returns user without token in JSON', async () => {
       await request(app)
         .post('/api/auth/register')
         .send({
@@ -158,9 +172,15 @@ describe('CareerLens API Integration Test Suite', () => {
         });
 
       assert.equal(res.status, 200);
-      assert.ok(res.body.token);
+      assert.equal(res.body.token, undefined, 'JWT must not be in response body');
       assert.equal(res.body.user.email, 'login@example.com');
       assert.equal(res.body.user.passwordHash, undefined);
+
+      const cookies = getCookieHeader(res);
+      assert.ok(cookies);
+      const authCookie = cookies.find((c) => c.startsWith(`${AUTH_COOKIE_NAME}=`));
+      assert.ok(authCookie);
+      assert.ok(authCookie.includes('HttpOnly'));
     });
 
     test('POST /login - returns generic 401 INVALID_CREDENTIALS on non-existent email', async () => {
@@ -205,7 +225,7 @@ describe('CareerLens API Integration Test Suite', () => {
       });
     });
 
-    test('GET /me - returns current user with valid Bearer token', async () => {
+    test('GET /me - returns current user with valid HttpOnly cookie', async () => {
       const registerRes = await request(app)
         .post('/api/auth/register')
         .send({
@@ -214,11 +234,11 @@ describe('CareerLens API Integration Test Suite', () => {
           password: 'Password123!',
         });
 
-      const token = registerRes.body.token;
+      const cookies = getCookieHeader(registerRes);
 
       const res = await request(app)
         .get('/api/auth/me')
-        .set('Authorization', `Bearer ${token}`);
+        .set('Cookie', cookies);
 
       assert.equal(res.status, 200);
       assert.ok(res.body.user);
@@ -226,7 +246,7 @@ describe('CareerLens API Integration Test Suite', () => {
       assert.equal(res.body.user.passwordHash, undefined);
     });
 
-    test('GET /me - rejects request with missing token (401 UNAUTHORIZED)', async () => {
+    test('GET /me - rejects request with missing cookie (401 UNAUTHORIZED)', async () => {
       const res = await request(app).get('/api/auth/me');
       assert.equal(res.status, 401);
       assert.deepEqual(res.body, {
@@ -237,10 +257,10 @@ describe('CareerLens API Integration Test Suite', () => {
       });
     });
 
-    test('GET /me - rejects request with malformed Authorization header (401 UNAUTHORIZED)', async () => {
+    test('GET /me - rejects request with tampered/invalid cookie (401 UNAUTHORIZED)', async () => {
       const res = await request(app)
         .get('/api/auth/me')
-        .set('Authorization', 'Basic invalid_token_format');
+        .set('Cookie', [`${AUTH_COOKIE_NAME}=invalid.tampered.token`]);
 
       assert.equal(res.status, 401);
       assert.deepEqual(res.body, {
@@ -251,22 +271,172 @@ describe('CareerLens API Integration Test Suite', () => {
       });
     });
 
-    test('GET /me - rejects request with tampered/invalid token (401 UNAUTHORIZED)', async () => {
-      const res = await request(app)
-        .get('/api/auth/me')
-        .set('Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.invalid.signature');
+    test('POST /logout - clears HttpOnly cookie with matching options and revokes client access', async () => {
+      const registerRes = await request(app)
+        .post('/api/auth/register')
+        .send({
+          name: 'Logout User',
+          email: 'logout@example.com',
+          password: 'Password123!',
+        });
 
-      assert.equal(res.status, 401);
-      assert.deepEqual(res.body, {
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Authentication required',
-        },
-      });
+      const authCookies = getCookieHeader(registerRes);
+
+      // Verify authenticated before logout
+      const beforeRes = await request(app)
+        .get('/api/auth/me')
+        .set('Cookie', authCookies);
+      assert.equal(beforeRes.status, 200);
+
+      // Call logout
+      const logoutRes = await request(app)
+        .post('/api/auth/logout')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', authCookies);
+
+      assert.equal(logoutRes.status, 200);
+      assert.deepEqual(logoutRes.body, { message: 'Logged out successfully' });
+
+      // Verify clear cookie header was sent
+      const clearCookies = getCookieHeader(logoutRes);
+      assert.ok(clearCookies, 'Expected clear cookie header');
+      const clearedCookie = clearCookies.find((c) => c.startsWith(`${AUTH_COOKIE_NAME}=`));
+      assert.ok(clearedCookie);
+      assert.ok(
+        clearedCookie.includes('Expires=Thu, 01 Jan 1970') || clearedCookie.includes('Max-Age=0'),
+        'Cookie must be expired on logout'
+      );
+
+      // Subsequent request using cleared cookie must fail
+      const afterRes = await request(app)
+        .get('/api/auth/me')
+        .set('Cookie', clearCookies);
+
+      assert.equal(afterRes.status, 401);
+      assert.equal(afterRes.body.error.code, 'UNAUTHORIZED');
     });
   });
 
-  // 3. Profile Routes
+  // 3. CSRF & CORS Protection
+  describe('CSRF & CORS Security', () => {
+    test('CORS - allows configured CLIENT_ORIGIN with credentials: true', async () => {
+      const res = await request(app)
+        .get('/api/health')
+        .set('Origin', 'http://localhost:5173');
+
+      assert.equal(res.status, 200);
+      assert.equal(res.headers['access-control-allow-origin'], 'http://localhost:5173');
+      assert.equal(res.headers['access-control-allow-credentials'], 'true');
+    });
+
+    test('CSRF - permits state-changing request from allowed CLIENT_ORIGIN', async () => {
+      const res = await request(app)
+        .post('/api/auth/register')
+        .set('Origin', 'http://localhost:5173')
+        .send({
+          name: 'CSRF Test User',
+          email: 'csrf_allowed@example.com',
+          password: 'Password123!',
+        });
+
+      assert.equal(res.status, 201);
+    });
+
+    test('CSRF - blocks state-changing request from unauthorized foreign Origin with 403 FORBIDDEN', async () => {
+      const res = await request(app)
+        .post('/api/auth/register')
+        .set('Origin', 'http://malicious-attacker-website.com')
+        .send({
+          name: 'Attacker User',
+          email: 'attacker@example.com',
+          password: 'Password123!',
+        });
+
+      assert.equal(res.status, 403);
+      assert.equal(res.body.error.code, 'FORBIDDEN');
+      assert.ok(res.body.error.message.includes('origin mismatch'));
+    });
+
+    test('CSRF - blocks state-changing request with unauthorized Referer with 403 FORBIDDEN', async () => {
+      const res = await request(app)
+        .post('/api/auth/register')
+        .set('Referer', 'http://evil-phishing-page.com/steal')
+        .send({
+          name: 'Attacker User 2',
+          email: 'attacker2@example.com',
+          password: 'Password123!',
+        });
+
+      assert.equal(res.status, 403);
+      assert.equal(res.body.error.code, 'FORBIDDEN');
+    });
+
+    test('CSRF - blocks cookie-authenticated state-changing request when both Origin and Referer are absent with 403 FORBIDDEN', async () => {
+      const reg = await request(app)
+        .post('/api/auth/register')
+        .send({
+          name: 'Cookie CSRF User',
+          email: 'cookie_csrf@example.com',
+          password: 'Password123!',
+        });
+      const cookie = getCookieHeader(reg);
+
+      const res = await request(app)
+        .post('/api/auth/logout')
+        .set('Cookie', cookie);
+
+      assert.equal(res.status, 403);
+      assert.equal(res.body.error.code, 'FORBIDDEN');
+      assert.equal(res.body.error.message, 'Cross-site request forgery protection: missing origin and referer');
+    });
+
+    test('CSRF - blocks state-changing request with malformed Origin with 403 FORBIDDEN', async () => {
+      const res = await request(app)
+        .post('/api/auth/register')
+        .set('Origin', 'not-a-valid-url')
+        .send({
+          name: 'Malformed Origin User',
+          email: 'malformed_origin@example.com',
+          password: 'Password123!',
+        });
+
+      assert.equal(res.status, 403);
+      assert.equal(res.body.error.code, 'FORBIDDEN');
+      assert.equal(res.body.error.message, 'Cross-site request forgery protection: invalid origin');
+    });
+
+    test('CSRF - blocks state-changing request from prefix-matching but foreign Origin with 403 FORBIDDEN', async () => {
+      const res = await request(app)
+        .post('/api/auth/register')
+        .set('Origin', 'http://localhost.attacker-site.com:5173')
+        .send({
+          name: 'Prefix Attacker',
+          email: 'prefix_attacker@example.com',
+          password: 'Password123!',
+        });
+
+      assert.equal(res.status, 403);
+      assert.equal(res.body.error.code, 'FORBIDDEN');
+      assert.equal(res.body.error.message, 'Cross-site request forgery protection: origin mismatch');
+    });
+
+    test('CSRF - blocks state-changing request with malformed Referer with 403 FORBIDDEN', async () => {
+      const res = await request(app)
+        .post('/api/auth/register')
+        .set('Referer', 'malformed-referer-url')
+        .send({
+          name: 'Malformed Referer User',
+          email: 'malformed_ref@example.com',
+          password: 'Password123!',
+        });
+
+      assert.equal(res.status, 403);
+      assert.equal(res.body.error.code, 'FORBIDDEN');
+      assert.equal(res.body.error.message, 'Cross-site request forgery protection: invalid referer');
+    });
+  });
+
+  // 4. Profile Routes with Cookie Auth
   describe('/api/profile', () => {
     test('GET /profile - returns 200 with canonical empty default profile when user has no saved profile', async () => {
       const reg = await request(app)
@@ -277,9 +447,11 @@ describe('CareerLens API Integration Test Suite', () => {
           password: 'Password123!',
         });
 
+      const cookies = getCookieHeader(reg);
+
       const res = await request(app)
         .get('/api/profile')
-        .set('Authorization', `Bearer ${reg.body.token}`);
+        .set('Cookie', cookies);
 
       assert.equal(res.status, 200);
       assert.ok(res.body.profile);
@@ -293,7 +465,7 @@ describe('CareerLens API Integration Test Suite', () => {
       assert.notEqual(res.body.profile, null, 'Empty profile must not be null');
     });
 
-    test('PUT /profile and GET /profile - upserts and reads back user profile', async () => {
+    test('PUT /profile and GET /profile - upserts and reads back user profile using cookie auth', async () => {
       const reg = await request(app)
         .post('/api/auth/register')
         .send({
@@ -302,7 +474,7 @@ describe('CareerLens API Integration Test Suite', () => {
           password: 'Password123!',
         });
 
-      const token = reg.body.token;
+      const cookies = getCookieHeader(reg);
 
       const profilePayload = {
         headline: 'Senior Backend Engineer',
@@ -327,7 +499,8 @@ describe('CareerLens API Integration Test Suite', () => {
 
       const putRes = await request(app)
         .put('/api/profile')
-        .set('Authorization', `Bearer ${token}`)
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookies)
         .send(profilePayload);
 
       assert.equal(putRes.status, 200);
@@ -341,7 +514,7 @@ describe('CareerLens API Integration Test Suite', () => {
       // Verify GET returns the updated profile
       const getRes = await request(app)
         .get('/api/profile')
-        .set('Authorization', `Bearer ${token}`);
+        .set('Cookie', cookies);
 
       assert.equal(getRes.status, 200);
       assert.equal(getRes.body.profile.headline, 'Senior Backend Engineer');
@@ -357,14 +530,15 @@ describe('CareerLens API Integration Test Suite', () => {
           password: 'Password123!',
         });
 
-      const token = reg.body.token;
+      const cookies = getCookieHeader(reg);
 
       // Create skills array exceeding 50 items limit
       const tooManySkills = Array.from({ length: 55 }, (_, i) => `Skill${i}`);
 
       const res = await request(app)
         .put('/api/profile')
-        .set('Authorization', `Bearer ${token}`)
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookies)
         .send({
           skills: tooManySkills,
         });
@@ -385,9 +559,12 @@ describe('CareerLens API Integration Test Suite', () => {
           password: 'Password123!',
         });
 
+      const userACookies = getCookieHeader(userAReg);
+
       await request(app)
         .put('/api/profile')
-        .set('Authorization', `Bearer ${userAReg.body.token}`)
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', userACookies)
         .send({
           headline: 'User A Secret Headline',
           targetRole: 'Architect',
@@ -403,9 +580,11 @@ describe('CareerLens API Integration Test Suite', () => {
           password: 'Password123!',
         });
 
+      const userBCookies = getCookieHeader(userBReg);
+
       const userBProfile = await request(app)
         .get('/api/profile')
-        .set('Authorization', `Bearer ${userBReg.body.token}`);
+        .set('Cookie', userBCookies);
 
       assert.equal(userBProfile.status, 200);
       // User B should get canonical empty default, NOT User A's data

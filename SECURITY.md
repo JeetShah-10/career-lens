@@ -24,8 +24,13 @@ The app stores personal data (resumes) and calls a paid-by-default third-party A
 - JWT: sign with HS256, set `expiresIn` (e.g. `1d`), and verify with the algorithm pinned (`{ algorithms: ['HS256'] }`). Payload holds only the user id.
 - Login failure message is always generic: `Invalid email or password`. Never reveal which part was wrong.
 - Registration: lowercase and trim email, enforce a minimum password length of 8, and return 409 on a duplicate email.
-- **Token storage (known tradeoff):** the frontend keeps the token in memory/`localStorage` and sends `Authorization: Bearer <token>`. This is simple and works across Vercel + Render. It is exposed to XSS, which is why Section 5 (no raw HTML rendering) is mandatory.
-- Every route except `register`, `login` and `health` goes through the auth middleware.
+- **Token storage & HttpOnly cookies:** The server issues the signed JWT in a protected `HttpOnly` cookie (`token`) upon successful `POST /api/auth/register` and `POST /api/auth/login`. Neither response returns the token in JSON.
+  - Cookie security flags: `httpOnly: true` (prevents JavaScript reading), `path: '/'`, `maxAge: 86400000` (1 day, matching JWT expiry `1d`).
+  - Environment-aware flags: `secure: true` in production HTTPS (`false` in local HTTP development); `sameSite: 'none'` in cross-site production deployment (`'lax'` in development / same-site).
+  - The frontend makes credentialed requests (`credentials: 'include'`). Frontend JavaScript never stores, reads, or exposes the token in React state, `localStorage`, or `sessionStorage`.
+  - Sign out / Logout: `POST /api/auth/logout` clears the browser cookie using the exact matching name, path, and security options.
+  - Limitation note: Clearing the cookie terminates browser session access; a copied stateless JWT remains cryptographically valid until its 1-day expiry. There is no server-side token revocation table in this MVP.
+- Every route except `register`, `login`, `logout` and `health` goes through the auth middleware.
 
 ## 3. Authorization and data ownership (this replaces "RLS")
 
@@ -105,7 +110,8 @@ The resume text and the job description are **untrusted input that gets fed to a
 ## 9. HTTP hardening
 
 - `helmet()` enabled.
-- CORS: allow only `CLIENT_ORIGIN` (exact origin, from env). Never `origin: '*'` together with credentials.
+- **CORS:** allow only `CLIENT_ORIGIN` (exact origin, from env). Never `origin: '*'` together with credentials. Configured with `credentials: true`.
+- **CSRF Defense:** Because HttpOnly cookies are attached automatically by browsers, a dedicated CSRF middleware inspects state-changing requests (`POST`, `PUT`, `PATCH`, `DELETE`). It parses and compares `Origin` (or `Referer` if origin is absent) against `CLIENT_ORIGIN` using exact URL origin matching. Foreign or malformed origins/referers are rejected with HTTP 403 `FORBIDDEN` (`code: "FORBIDDEN"`). For state-changing requests carrying an auth cookie, missing Origin and Referer headers are also strictly rejected with HTTP 403 `FORBIDDEN` to prevent blind cross-site submissions. Safe read-only methods (`GET`, `HEAD`, `OPTIONS`) and unauthenticated server-to-server requests without Origin/Referer headers are permitted.
 - Disable `x-powered-by` (helmet does this).
 - Health route `GET /api/health` returns only `{ status: "ok" }`.
 - HTTPS only in production (Vercel and Render provide it). Do not hardcode `http://` URLs.

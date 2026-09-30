@@ -1,12 +1,18 @@
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const { signToken } = require('../utils/token');
+const {
+  AUTH_COOKIE_NAME,
+  getAuthCookieOptions,
+  getClearCookieOptions,
+} = require('../utils/cookies');
 const logger = require('../utils/logger');
 const { asyncHandler } = require('../utils/errors');
 
 /**
  * Register a new user
  * POST /api/auth/register
+ * Issues signed JWT in HttpOnly cookie; returns safe user object without token in JSON.
  */
 const register = asyncHandler(async (req, res) => {
   const { name, email, password } = req.validated.body;
@@ -37,12 +43,15 @@ const register = asyncHandler(async (req, res) => {
 
   const token = signToken(user._id);
 
+  // Set HttpOnly cookie with matching expiration and security attributes
+  res.cookie(AUTH_COOKIE_NAME, token, getAuthCookieOptions());
+
   logger.info('User registered successfully', {
     userId: user._id.toString(),
   });
 
+  // Never return token in JSON response
   return res.status(201).json({
-    token,
     user: {
       id: user._id.toString(),
       name: user.name,
@@ -57,6 +66,7 @@ const DUMMY_HASH = bcrypt.hashSync('timing_protection_dummy_hash_placeholder', 1
 /**
  * Log in an existing user
  * POST /api/auth/login
+ * Issues signed JWT in HttpOnly cookie; returns safe user object without token in JSON.
  */
 const login = asyncHandler(async (req, res) => {
   const { email, password } = req.validated.body;
@@ -83,12 +93,15 @@ const login = asyncHandler(async (req, res) => {
 
   const token = signToken(user._id);
 
+  // Set HttpOnly cookie with matching expiration and security attributes
+  res.cookie(AUTH_COOKIE_NAME, token, getAuthCookieOptions());
+
   logger.info('User logged in successfully', {
     userId: user._id.toString(),
   });
 
+  // Never return token in JSON response
   return res.status(200).json({
-    token,
     user: {
       id: user._id.toString(),
       name: user.name,
@@ -98,8 +111,27 @@ const login = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Log out user by clearing the HttpOnly cookie
+ * POST /api/auth/logout
+ * Clears the cookie using matching name, path, secure, and sameSite options.
+ */
+const logout = asyncHandler(async (req, res) => {
+  res.clearCookie(AUTH_COOKIE_NAME, getClearCookieOptions());
+
+  logger.info('User logged out successfully', {
+    ip: req.ip,
+    userId: req.user?.id,
+  });
+
+  return res.status(200).json({
+    message: 'Logged out successfully',
+  });
+});
+
+/**
  * Get current authenticated user
  * GET /api/auth/me
+ * Authenticates from HttpOnly cookie and returns safe user profile.
  */
 const getMe = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user.id);
@@ -124,5 +156,6 @@ const getMe = asyncHandler(async (req, res) => {
 module.exports = {
   register,
   login,
+  logout,
   getMe,
 };
