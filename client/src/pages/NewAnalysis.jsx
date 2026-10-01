@@ -8,8 +8,6 @@ import {
   Upload,
   User,
   ShieldCheck,
-  Sparkles,
-  AlertCircle,
   CheckCircle2,
   ArrowRight,
   Target,
