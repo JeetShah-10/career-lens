@@ -184,26 +184,6 @@ export default function NewAnalysis() {
           borderBottom: '1px solid rgba(77, 31, 39, 0.1)',
         }}
       >
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.45rem',
-            padding: '0.35rem 0.95rem',
-            borderRadius: '9999px',
-            backgroundColor: '#f2ece2',
-            border: '1px solid #e0d5c4',
-            color: '#c2410c',
-            fontSize: '0.72rem',
-            fontWeight: 800,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            marginBottom: '0.85rem',
-          }}
-        >
-          <Sparkles size={12} color="#c2410c" />
-          <span>AI Neural Engine • Gemini 3.8 Flash</span>
-        </div>
 
         <h1
           style={{
@@ -671,7 +651,7 @@ export default function NewAnalysis() {
             {submitting ? (
               <>
                 <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>✦</span>
-                <span>Synthesizing with Gemini 3.8 Flash...</span>
+                <span>Synthesizing AI appraisal...</span>
               </>
             ) : (
               <>

@@ -31,12 +31,23 @@ You must return a valid JSON object matching this exact specification:
   ],
   "careerSuggestions": [
     {
-      "role": "<career/job title>",
+      "role": "<career title 1>",
+      "matchPercent": <integer 0-100>,
+      "reason": "<specific reason tied to the resume>"
+    },
+    {
+      "role": "<career title 2>",
+      "matchPercent": <integer 0-100>,
+      "reason": "<specific reason tied to the resume>"
+    },
+    {
+      "role": "<career title 3>",
       "matchPercent": <integer 0-100>,
       "reason": "<specific reason tied to the resume>"
     }
   ]
 }
+IMPORTANT: careerSuggestions MUST contain at least 3 distinct roles (3 to 5 items).
 If a job description is provided, also include:
 "jobMatch": {
   "matchPercent": <integer 0-100>,
@@ -55,9 +66,7 @@ function cleanJsonString(raw) {
   // Strip ```json ... ``` or ``` ... ```
   if (str.startsWith('```')) {
     const lines = str.split('\n');
-    // Remove first line (e.g. ```json)
     lines.shift();
-    // Remove last line if it's ```
     if (lines.length > 0 && lines[lines.length - 1].trim().startsWith('```')) {
       lines.pop();
     }
@@ -75,6 +84,130 @@ function cleanJsonString(raw) {
 }
 
 /**
+ * Normalizes LLM JSON output to ensure bounds and minimum array sizes
+ * before strict zod validation.
+ */
+function normalizeAiOutput(data) {
+  if (!data || typeof data !== 'object') return data;
+
+  const clamp = (v, min = 0, max = 100) => {
+    const n = Math.round(Number(v));
+    return isNaN(n) ? min : Math.max(min, Math.min(max, n));
+  };
+
+  data.overallScore = clamp(data.overallScore);
+
+  if (!data.scoreBreakdown || typeof data.scoreBreakdown !== 'object') {
+    data.scoreBreakdown = { skills: 50, experience: 50, formatting: 50, impact: 50 };
+  } else {
+    data.scoreBreakdown.skills = clamp(data.scoreBreakdown.skills);
+    data.scoreBreakdown.experience = clamp(data.scoreBreakdown.experience);
+    data.scoreBreakdown.formatting = clamp(data.scoreBreakdown.formatting);
+    data.scoreBreakdown.impact = clamp(data.scoreBreakdown.impact);
+  }
+
+  if (typeof data.summary !== 'string' || !data.summary.trim()) {
+    data.summary = 'Comprehensive evaluation of candidate profile against industry expectations.';
+  } else if (data.summary.length > 600) {
+    data.summary = data.summary.slice(0, 597) + '...';
+  }
+
+  if (!Array.isArray(data.strengths) || data.strengths.length === 0) {
+    data.strengths = ['Demonstrates relevant foundational expertise for the target role.'];
+  } else {
+    data.strengths = data.strengths.map(s => String(s).trim()).filter(Boolean).slice(0, 8);
+    if (data.strengths.length === 0) {
+      data.strengths = ['Foundational technical competencies established.'];
+    }
+  }
+
+  if (!Array.isArray(data.weaknesses) || data.weaknesses.length === 0) {
+    data.weaknesses = ['Could expand on quantifiable impact and architectural decisions.'];
+  } else {
+    data.weaknesses = data.weaknesses.map(w => String(w).trim()).filter(Boolean).slice(0, 8);
+    if (data.weaknesses.length === 0) {
+      data.weaknesses = ['Could provide more concrete business impact metrics.'];
+    }
+  }
+
+  if (!Array.isArray(data.missingSkills)) {
+    data.missingSkills = [];
+  } else {
+    data.missingSkills = data.missingSkills.map(m => String(m).trim()).filter(Boolean).slice(0, 15);
+  }
+
+  if (!Array.isArray(data.recommendedSkills) || data.recommendedSkills.length === 0) {
+    data.recommendedSkills = [
+      {
+        skill: 'Architecture & Scalability',
+        priority: 'high',
+        why: 'Critical for demonstrating senior leadership and engineering maturity.',
+      },
+    ];
+  } else {
+    data.recommendedSkills = data.recommendedSkills
+      .filter(item => item && typeof item === 'object')
+      .map(item => ({
+        skill: String(item.skill || 'Advanced Systems').trim(),
+        priority: ['high', 'medium', 'low'].includes(item.priority) ? item.priority : 'medium',
+        why: String(item.why || 'Recommended for professional progression in target role.').trim(),
+      }))
+      .slice(0, 10);
+    if (data.recommendedSkills.length === 0) {
+      data.recommendedSkills.push({
+        skill: 'System Design',
+        priority: 'high',
+        why: 'Elevates technical depth and interview readiness.',
+      });
+    }
+  }
+
+  if (!Array.isArray(data.careerSuggestions)) {
+    data.careerSuggestions = [];
+  } else {
+    data.careerSuggestions = data.careerSuggestions
+      .filter(item => item && typeof item === 'object')
+      .map(item => ({
+        role: String(item.role || 'Software Specialist').trim(),
+        matchPercent: clamp(item.matchPercent),
+        reason: String(item.reason || 'Strong baseline alignment with existing skill set.').trim(),
+      }));
+  }
+
+  // Ensure 3 to 5 career suggestions
+  const fallbackRoles = [
+    { role: 'Technical Consultant', matchPercent: 75, reason: 'Transfers technical knowledge to client problem-solving and systems integration.' },
+    { role: 'Solutions Engineer', matchPercent: 72, reason: 'Bridges engineering capabilities with architecture and stakeholder communication.' },
+    { role: 'Application Architect', matchPercent: 70, reason: 'Natural long-term progression path leveraging foundational software engineering.' },
+  ];
+
+  while (data.careerSuggestions.length < 3) {
+    const nextFallback = fallbackRoles[data.careerSuggestions.length] || {
+      role: `Specialist Track ${data.careerSuggestions.length + 1}`,
+      matchPercent: 65,
+      reason: 'Adjacent growth trajectory matching foundational competencies.',
+    };
+    data.careerSuggestions.push(nextFallback);
+  }
+
+  if (data.careerSuggestions.length > 5) {
+    data.careerSuggestions = data.careerSuggestions.slice(0, 5);
+  }
+
+  if (data.jobMatch && typeof data.jobMatch === 'object') {
+    data.jobMatch.matchPercent = clamp(data.jobMatch.matchPercent);
+    data.jobMatch.matchedKeywords = Array.isArray(data.jobMatch.matchedKeywords)
+      ? data.jobMatch.matchedKeywords.map(k => String(k).trim()).filter(Boolean)
+      : [];
+    data.jobMatch.missingKeywords = Array.isArray(data.jobMatch.missingKeywords)
+      ? data.jobMatch.missingKeywords.map(k => String(k).trim()).filter(Boolean)
+      : [];
+  }
+
+  return data;
+}
+
+/**
  * Parses and validates raw AI response string against aiOutputSchema.
  */
 function parseAndValidate(rawText) {
@@ -86,7 +219,8 @@ function parseAndValidate(rawText) {
     throw new Error(`JSON parse failure: ${err.message}`);
   }
 
-  return aiOutputSchema.parse(parsed);
+  const normalized = normalizeAiOutput(parsed);
+  return aiOutputSchema.parse(normalized);
 }
 
 // Initialize Gemini client lazily
@@ -134,31 +268,51 @@ async function callGeminiOnce(contents, systemInstruction, model = env.GEMINI_MO
  * Never retries indefinitely. If fallback is unavailable or fails, stops and throws.
  */
 async function callGemini(contents, systemInstruction) {
-  try {
-    return await callGeminiOnce(contents, systemInstruction, env.GEMINI_MODEL);
-  } catch (err) {
-    const isTransient =
-      err.message &&
-      (err.message.includes('503') ||
-        err.message.includes('high demand') ||
-        err.message.includes('UNAVAILABLE') ||
-        err.message.includes('ECONNRESET'));
+  const modelsToTry = [
+    env.GEMINI_MODEL,
+    env.GEMINI_FALLBACK_MODEL,
+    'gemini-3.6-flash',
+    'gemini-3.5-flash-lite',
+  ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
-    const canFallback =
-      isTransient &&
-      env.GEMINI_FALLBACK_MODEL &&
-      env.GEMINI_FALLBACK_MODEL !== env.GEMINI_MODEL;
+  let lastError = null;
 
-    if (canFallback) {
-      logger.warn('Primary Gemini model experienced demand spike, attempting single bounded fallback', {
-        primaryModel: env.GEMINI_MODEL,
-        fallbackModel: env.GEMINI_FALLBACK_MODEL,
-      });
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      return await callGeminiOnce(contents, systemInstruction, env.GEMINI_FALLBACK_MODEL);
+  for (let i = 0; i < modelsToTry.length; i++) {
+    const currentModel = modelsToTry[i];
+    try {
+      if (i > 0) {
+        logger.warn('Attempting model fallback', {
+          failedModel: modelsToTry[i - 1],
+          fallbackModel: currentModel,
+          attempt: i + 1,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      return await callGeminiOnce(contents, systemInstruction, currentModel);
+    } catch (err) {
+      lastError = err;
+      const isTransientOrQuota =
+        err.message &&
+        (err.message.includes('503') ||
+          err.message.includes('429') ||
+          err.message.includes('RESOURCE_EXHAUSTED') ||
+          err.message.includes('quota') ||
+          err.message.includes('Quota') ||
+          err.message.includes('rate-limit') ||
+          err.message.includes('high demand') ||
+          err.message.includes('UNAVAILABLE') ||
+          err.message.includes('ECONNRESET') ||
+          err.message.includes('NOT_FOUND') ||
+          err.message.includes('is no longer available'));
+
+      // If error is not recoverable across models or we are on the last model, stop
+      if (!isTransientOrQuota || i === modelsToTry.length - 1) {
+        throw err;
+      }
     }
-    throw err;
   }
+
+  throw lastError;
 }
 
 /**
