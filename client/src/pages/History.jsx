@@ -693,17 +693,36 @@ export default function History() {
                     </span>
                   </div>
 
-                  <h3
-                    style={{
-                      fontFamily: "'Taberna', 'Taberna Serif', 'Playfair Display', Georgia, serif",
-                      fontSize: '1.45rem',
-                      fontWeight: 600,
-                      color: '#4d1f27',
-                      margin: '0 0 0.35rem',
-                    }}
-                  >
-                    {item.targetRole}
-                  </h3>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap', marginBottom: '0.35rem' }}>
+                    <h3
+                      style={{
+                        fontFamily: "'Taberna', 'Taberna Serif', 'Playfair Display', Georgia, serif",
+                        fontSize: '1.45rem',
+                        fontWeight: 600,
+                        color: '#4d1f27',
+                        margin: 0,
+                      }}
+                    >
+                      {item.targetRole?.replace(/^\[DEMO\]\s*/, '')}
+                    </h3>
+                    {item.targetRole?.startsWith('[DEMO]') && (
+                      <span
+                        style={{
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          backgroundColor: '#fef3c7',
+                          color: '#92400e',
+                          border: '1px solid #fde68a',
+                          letterSpacing: '0.04em',
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        Demo Fixture
+                      </span>
+                    )}
+                  </div>
 
                   <p style={{ fontSize: '0.86rem', color: '#574f4b', margin: 0 }}>
                     AI-powered comprehensive qualification and market readiness assessment.

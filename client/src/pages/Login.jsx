@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import AuthLayout from '../components/AuthLayout';
 import Alert from '../components/Alert';
-import { User, Lock, Eye, EyeOff, Sparkles } from 'lucide-react';
+import { User, Lock, Eye, EyeOff } from 'lucide-react';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -57,31 +57,7 @@ export default function Login() {
     }
   };
 
-  // Instant demo login for hackathon testing & judges
-  const handleQuickDemo = async () => {
-    const demoEmail = 'alex.rivera@example.com';
-    const demoPass = 'Password123!';
-    setEmail('alex.rivera@example.com');
-    setPassword(demoPass);
-    setSubmitting(true);
-    setFormError(null);
 
-    try {
-      await login(demoEmail, demoPass);
-      // Strictly enforce requested flowchart: Login/signup -> home
-      navigate('/', { replace: true });
-    } catch {
-      // Auto-register demo account if first time running
-      try {
-        await register('Alex Rivera', demoEmail, demoPass);
-        navigate('/', { replace: true });
-      } catch (regErr) {
-        setFormError(regErr.message || 'Could not auto-login with demo account.');
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   return (
     <AuthLayout
@@ -224,7 +200,7 @@ export default function Login() {
 
           <button
             type="button"
-            onClick={handleQuickDemo}
+            onClick={() => setFormError('Password reset is not supported in this evaluation release. Please create a new account via Sign up to continue.')}
             style={{
               background: 'none',
               border: 'none',
@@ -267,31 +243,6 @@ export default function Login() {
         >
           <span>{submitting ? 'Logging in...' : 'Login'}</span>
         </button>
-
-        {/* Quick Demo Pill Shortcut */}
-        <div style={{ marginTop: '1rem', textAlign: 'center' }}>
-          <button
-            type="button"
-            onClick={handleQuickDemo}
-            disabled={submitting}
-            style={{
-              background: 'rgba(37, 99, 235, 0.08)',
-              border: '1px dashed #2563eb',
-              borderRadius: '9999px',
-              padding: '0.45rem 1rem',
-              fontSize: '0.78rem',
-              color: '#1d4ed8',
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-              fontWeight: 600,
-            }}
-          >
-            <Sparkles size={13} color="#1d4ed8" />
-            <span>Instant Demo Account (Alex Rivera)</span>
-          </button>
-        </div>
       </form>
     </AuthLayout>
   );

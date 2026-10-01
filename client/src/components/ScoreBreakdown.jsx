@@ -90,7 +90,7 @@ export default function ScoreBreakdown({ breakdown, overallScore }) {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
               <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#8c827a', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                Overall Qualification Rating
+                AI Coaching Score Estimate
               </span>
               <span
                 style={{
@@ -107,7 +107,7 @@ export default function ScoreBreakdown({ breakdown, overallScore }) {
               </span>
             </div>
             <p style={{ fontSize: '0.82rem', color: '#574f4b', margin: 0, maxWidth: '460px', lineHeight: 1.45 }}>
-              Multidimensional coaching assessment compiled against live industry qualification standards.
+              AI coaching estimate generated from submitted resume signals. Designed for personal skill development, not a definitive hiring judgment.
             </p>
           </div>
         </div>

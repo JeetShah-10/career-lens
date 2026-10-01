@@ -167,19 +167,38 @@ export default function Result() {
             <span>Target Benchmark Role</span>
           </div>
 
-          <h1
-            style={{
-              fontFamily: "'Taberna', 'Taberna Serif', 'Playfair Display', Georgia, serif",
-              fontSize: '2.35rem',
-              fontWeight: 600,
-              color: '#4d1f27',
-              letterSpacing: '-0.02em',
-              margin: '0 0 0.45rem',
-              lineHeight: 1.2,
-            }}
-          >
-            {targetRole}
-          </h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', margin: '0 0 0.45rem' }}>
+            <h1
+              style={{
+                fontFamily: "'Taberna', 'Taberna Serif', 'Playfair Display', Georgia, serif",
+                fontSize: '2.35rem',
+                fontWeight: 600,
+                color: '#4d1f27',
+                letterSpacing: '-0.02em',
+                margin: 0,
+                lineHeight: 1.2,
+              }}
+            >
+              {targetRole?.replace(/^\[DEMO\]\s*/, '')}
+            </h1>
+            {(targetRole?.startsWith('[DEMO]') || result?.summary?.startsWith('[OFFLINE EXHIBITION FIXTURE]')) && (
+              <span
+                style={{
+                  fontSize: '0.75rem',
+                  fontWeight: 800,
+                  padding: '4px 10px',
+                  borderRadius: '8px',
+                  backgroundColor: '#fef3c7',
+                  color: '#92400e',
+                  border: '1px solid #fde68a',
+                  letterSpacing: '0.04em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                Demo Fixture
+              </span>
+            )}
+          </div>
 
           {resumeSource && (
             <span style={{ fontSize: '0.78rem', color: '#8c827a', textTransform: 'capitalize' }}>

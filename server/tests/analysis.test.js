@@ -327,6 +327,438 @@ describe('CareerLens Analysis & History Integration Test Suite', () => {
       assert.equal(res.body.analysis.resumeText, undefined);
       assert.equal(res.body.analysis.jobDescription, undefined);
     });
+
+    test('triggers single bounded fallback to GEMINI_FALLBACK_MODEL on 429 quota/rate limit and succeeds', async () => {
+      const { cookie } = await createTestUser('user429@example.com');
+      const modelsCalled = [];
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async ({ model }) => {
+            modelsCalled.push(model);
+            if (model === 'gemini-3.8-flash') {
+              const quotaErr = new Error('Quota exceeded for quota metric GenerateRequestsPerDayPerProjectPerModel-FreeTier');
+              quotaErr.status = 429;
+              throw quotaErr;
+            }
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      assert.equal(res.status, 201);
+      assert.deepEqual(modelsCalled, ['gemini-3.8-flash', 'gemini-3.5-flash']);
+      assert.equal(res.body.analysis.overallScore, 82);
+    });
+
+    test('does NOT attempt fallback on 401 unauthorized / invalid API key and returns 502 without calling fallback model', async () => {
+      const { cookie } = await createTestUser('user401@example.com');
+      const modelsCalled = [];
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async ({ model }) => {
+            modelsCalled.push(model);
+            const authErr = new Error('API_KEY_INVALID: API key not valid. Please pass a valid API key.');
+            authErr.status = 401;
+            throw authErr;
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      assert.equal(res.status, 502);
+      assert.equal(res.body.error.code, 'AI_SERVICE_UNAVAILABLE');
+      // Must NOT attempt fallback model on non-retryable 401 error
+      assert.deepEqual(modelsCalled, ['gemini-3.8-flash']);
+    });
+
+    test('does NOT attempt fallback on 404 model not found and returns 502 without calling fallback model', async () => {
+      const { cookie } = await createTestUser('user404@example.com');
+      const modelsCalled = [];
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async ({ model }) => {
+            modelsCalled.push(model);
+            const notFoundErr = new Error('NOT_FOUND: models/gemini-3.8-flash is not found');
+            notFoundErr.status = 404;
+            throw notFoundErr;
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      assert.equal(res.status, 502);
+      assert.equal(res.body.error.code, 'AI_SERVICE_UNAVAILABLE');
+      // Must NOT attempt fallback model on 404
+      assert.deepEqual(modelsCalled, ['gemini-3.8-flash']);
+    });
+
+    test('does NOT attempt fallback on 400 invalid request / argument and returns 502 without calling fallback model', async () => {
+      const { cookie } = await createTestUser('user400@example.com');
+      const modelsCalled = [];
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async ({ model }) => {
+            modelsCalled.push(model);
+            const badReqErr = new Error('INVALID_ARGUMENT: contents cannot be empty');
+            badReqErr.status = 400;
+            throw badReqErr;
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      assert.equal(res.status, 502);
+      assert.equal(res.body.error.code, 'AI_SERVICE_UNAVAILABLE');
+      assert.deepEqual(modelsCalled, ['gemini-3.8-flash']);
+    });
+
+    test('returns safe 502 AI_SERVICE_UNAVAILABLE when fallback model also fails with exactly 2 attempts total', async () => {
+      const { cookie } = await createTestUser('userDualFail@example.com');
+      const modelsCalled = [];
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async ({ model }) => {
+            modelsCalled.push(model);
+            const err = new Error('503 Service Unavailable');
+            err.status = 503;
+            throw err;
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      assert.equal(res.status, 502);
+      assert.equal(res.body.error.code, 'AI_SERVICE_UNAVAILABLE');
+      // Exactly primary + one fallback attempt, never cascades through unconfigured models
+      assert.deepEqual(modelsCalled, ['gemini-3.8-flash', 'gemini-3.5-flash']);
+    });
+
+    test('does NOT fabricate replacement placeholders when model returns too few array items (2 career suggestions) and rejects after bounded retry without saving to DB', async () => {
+      const { cookie } = await createTestUser('userTooFew@example.com');
+      let callCount = 0;
+
+      const tooFewSuggestionsResult = {
+        ...validAnalysisResult,
+        careerSuggestions: [
+          { role: 'Backend Developer', matchPercent: 85, reason: 'Good backend skills' },
+          { role: 'Full Stack Engineer', matchPercent: 80, reason: 'Good web skills' },
+        ], // Only 2 items; schema requires min(3)
+      };
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async () => {
+            callCount++;
+            return { text: JSON.stringify(tooFewSuggestionsResult) };
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      // Must fail with 502 because it must NOT fabricate fake 3rd suggestion
+      assert.equal(res.status, 502);
+      assert.equal(res.body.error.code, 'AI_SERVICE_UNAVAILABLE');
+
+      // Exactly 2 attempts: 1 initial attempt + 1 bounded schema-repair retry
+      assert.equal(callCount, 2);
+
+      // Verify no broken or fabricated analysis record was persisted to DB
+      const userAnalyses = await Analysis.find({});
+      assert.equal(userAnalyses.length, 0);
+    });
+
+    test('isRetryableError unit tests distinguish retryable vs non-retryable errors accurately', () => {
+      // Retryable
+      assert.equal(aiService.isRetryableError({ status: 429 }), true);
+      assert.equal(aiService.isRetryableError({ status: 503 }), true);
+      assert.equal(aiService.isRetryableError({ message: '503 Service Unavailable' }), true);
+      assert.equal(aiService.isRetryableError({ message: 'RESOURCE_EXHAUSTED' }), true);
+      assert.equal(aiService.isRetryableError({ message: 'Quota exceeded for quota metric' }), true);
+      assert.equal(aiService.isRetryableError({ message: 'overloaded due to high demand' }), true);
+      assert.equal(aiService.isRetryableError({ message: 'fetch failed' }), true);
+
+      // Non-retryable
+      assert.equal(aiService.isRetryableError({ status: 400 }), false);
+      assert.equal(aiService.isRetryableError({ status: 401 }), false);
+      assert.equal(aiService.isRetryableError({ status: 403 }), false);
+      assert.equal(aiService.isRetryableError({ status: 404 }), false);
+      assert.equal(aiService.isRetryableError({ message: 'API_KEY_INVALID' }), false);
+      assert.equal(aiService.isRetryableError({ message: 'PERMISSION_DENIED' }), false);
+      assert.equal(aiService.isRetryableError({ message: 'INVALID_ARGUMENT' }), false);
+      assert.equal(aiService.isRetryableError(null), false);
+    });
+
+    test('makes exactly 1 call to primary model on primary success without calling fallback', async () => {
+      const { cookie } = await createTestUser('primarySuccess@example.com');
+      const modelsCalled = [];
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async ({ model }) => {
+            modelsCalled.push(model);
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      assert.equal(res.status, 201);
+      assert.deepEqual(modelsCalled, ['gemini-3.8-flash']);
+      assert.equal(res.body.analysis.overallScore, 82);
+    });
+
+    test('recovers from initial schema validation error via single schema repair retry on same model (2 calls total)', async () => {
+      const { cookie } = await createTestUser('schemaRepairSuccess@example.com');
+      const modelsCalled = [];
+      let callCount = 0;
+
+      const invalidSchemaResult = {
+        ...validAnalysisResult,
+        careerSuggestions: [
+          { role: 'Backend Engineer', matchPercent: 80, reason: 'Good' },
+        ], // only 1 suggestion, schema requires min 3
+      };
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async ({ model }) => {
+            modelsCalled.push(model);
+            callCount++;
+            if (callCount === 1) {
+              return { text: JSON.stringify(invalidSchemaResult) };
+            }
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      assert.equal(res.status, 201);
+      assert.equal(callCount, 2);
+      assert.deepEqual(modelsCalled, ['gemini-3.8-flash', 'gemini-3.8-flash']);
+      assert.equal(res.body.analysis.overallScore, 82);
+    });
+
+    test('normalizeAiParsedJson rounds finite in-range floats to integers, preserves out-of-range values for Zod rejection, and does not invent missing fields', () => {
+      const input = {
+        overallScore: 82.6,
+        scoreBreakdown: {
+          skills: 85.2,
+          experience: 79.9,
+          formatting: 84.5,
+          impact: 77.1,
+        },
+      };
+
+      const normalized = aiService.normalizeAiParsedJson(input);
+      assert.equal(normalized.overallScore, 83);
+      assert.equal(normalized.scoreBreakdown.skills, 85);
+      assert.equal(normalized.scoreBreakdown.experience, 80);
+      assert.equal(normalized.scoreBreakdown.formatting, 85);
+      assert.equal(normalized.scoreBreakdown.impact, 77);
+
+      // Out-of-range scores (> 100 or < 0) are left unrounded so aiOutputSchema strictly catches and rejects them
+      const outOfRangeInput = {
+        overallScore: 105.4,
+        scoreBreakdown: {
+          skills: -2.3,
+          experience: 80,
+          formatting: 85,
+          impact: 75,
+        },
+      };
+      const normalizedOutOfRange = aiService.normalizeAiParsedJson(outOfRangeInput);
+      assert.equal(normalizedOutOfRange.overallScore, 105.4);
+      assert.equal(normalizedOutOfRange.scoreBreakdown.skills, -2.3);
+
+      // Missing field is NOT invented
+      const missingInput = { overallScore: 70 };
+      const normalizedMissing = aiService.normalizeAiParsedJson(missingInput);
+      assert.equal(normalizedMissing.scoreBreakdown, undefined);
+    });
+
+    test('SDK configuration with retryOptions.attempts: 1 prevents internal HTTP retries on 429 quota exhaustion', async () => {
+      const { GoogleGenAI } = require('@google/genai');
+      let fetchAttempts = 0;
+      const fetchHistory = [];
+
+      const mockFetch = async (url) => {
+        fetchAttempts++;
+        const urlStr = url.toString();
+        const model = urlStr.includes('gemini-3.8-flash')
+          ? 'gemini-3.8-flash'
+          : urlStr.includes('gemini-3.5-flash')
+          ? 'gemini-3.5-flash'
+          : 'unknown';
+        fetchHistory.push({ attempt: fetchAttempts, model });
+
+        // Simulate 429 quota exhaustion
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: 429,
+              message: 'RESOURCE_EXHAUSTED: Quota exceeded for quota metric GenerateRequestsPerDayPerProjectPerModel-FreeTier',
+              status: 'RESOURCE_EXHAUSTED',
+            },
+          }),
+          { status: 429, headers: { 'Content-Type': 'application/json' } }
+        );
+      };
+
+      // Client configured identically to ai.service.js getGenAiClient
+      const client = new GoogleGenAI({
+        apiKey: 'test_key',
+        httpOptions: {
+          retryOptions: { attempts: 1 },
+          fetch: mockFetch,
+        },
+      });
+
+      // Call primary model
+      let primaryErr;
+      try {
+        await client.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: 'Analyze this resume',
+        });
+      } catch (err) {
+        primaryErr = err;
+      }
+
+      // Assert that exactly 1 HTTP transport attempt was made (not 5)
+      assert.ok(primaryErr);
+      assert.equal(fetchAttempts, 1);
+      assert.equal(fetchHistory[0].model, 'gemini-3.8-flash');
+      assert.equal(aiService.isRetryableError(primaryErr), true);
+
+      // Verify that after catching 429, invoking fallback model makes exactly 1 HTTP transport attempt
+      let fallbackErr;
+      try {
+        await client.models.generateContent({
+          model: 'gemini-3.5-flash',
+          contents: 'Analyze this resume',
+        });
+      } catch (err) {
+        fallbackErr = err;
+      }
+
+      assert.ok(fallbackErr);
+      assert.equal(fetchAttempts, 2);
+      assert.equal(fetchHistory[1].model, 'gemini-3.5-flash');
+
+      // Proves: Total HTTP network attempts across primary 429 failure + fallback model = exactly 2!
+    });
+
+    test('35-second abort signal cancels pending fetch immediately without waiting for backoff or hanging', async () => {
+      const { GoogleGenAI } = require('@google/genai');
+      const controller = new AbortController();
+      const startTime = Date.now();
+
+      // Trigger abort after 100ms
+      setTimeout(() => controller.abort(), 100);
+
+      const client = new GoogleGenAI({
+        apiKey: 'test_key',
+        httpOptions: {
+          retryOptions: { attempts: 1 },
+          fetch: async (_url, opts) => {
+            return new Promise((_, reject) => {
+              opts.signal.addEventListener('abort', () => {
+                reject(new Error('AbortError: signal timed out'));
+              });
+            });
+          },
+        },
+      });
+
+      let caughtErr;
+      try {
+        await client.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: 'Long running prompt',
+          config: {
+            abortSignal: controller.signal,
+          },
+        });
+      } catch (err) {
+        caughtErr = err;
+      }
+
+      const elapsed = Date.now() - startTime;
+      assert.ok(caughtErr);
+      // Confirms abort stopped the call immediately (~100-300ms, well below 35s)
+      assert.ok(elapsed < 1000, `Expected abort in <1000ms, took ${elapsed}ms`);
+    });
   });
 
   describe('POST /api/analyses (PDF File Upload Support)', () => {
