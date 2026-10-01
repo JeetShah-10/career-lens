@@ -295,8 +295,8 @@ describe('CareerLens Analysis & History Integration Test Suite', () => {
       assert.equal(res.body.error.code, 'AI_SERVICE_UNAVAILABLE');
     });
 
-    test('triggers single bounded fallback to GEMINI_FALLBACK_MODEL on 503 spike and succeeds', async () => {
-      const { cookie } = await createTestUser();
+    test('triggers model ladder fallback on 503 spike to next quality model (gemini-3.7-flash) and succeeds', async () => {
+      const { cookie } = await createTestUser('user503@example.com');
       const modelsCalled = [];
 
       aiService._setGenAiClient({
@@ -321,11 +321,774 @@ describe('CareerLens Analysis & History Integration Test Suite', () => {
         });
 
       assert.equal(res.status, 201);
-      assert.deepEqual(modelsCalled, ['gemini-3.8-flash', 'gemini-3.5-flash']);
+      assert.deepEqual(modelsCalled, ['gemini-3.8-flash', 'gemini-3.7-flash']);
       assert.equal(res.body.analysis.overallScore, 82);
       assert.ok(res.body.analysis.result);
       assert.equal(res.body.analysis.resumeText, undefined);
       assert.equal(res.body.analysis.jobDescription, undefined);
+    });
+
+    test('triggers model ladder fallback on 429 quota/rate limit to next quality model (gemini-3.7-flash) and succeeds', async () => {
+      const { cookie } = await createTestUser('user429@example.com');
+      const modelsCalled = [];
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async ({ model }) => {
+            modelsCalled.push(model);
+            if (model === 'gemini-3.8-flash') {
+              const quotaErr = new Error('Quota exceeded for quota metric GenerateRequestsPerDayPerProjectPerModel-FreeTier');
+              quotaErr.status = 429;
+              throw quotaErr;
+            }
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      assert.equal(res.status, 201);
+      assert.deepEqual(modelsCalled, ['gemini-3.8-flash', 'gemini-3.7-flash']);
+      assert.equal(res.body.analysis.overallScore, 82);
+    });
+
+    test('traverses multi-tier model ladder: 3.8 (429 quota) -> 3.7 (503 demand) -> 3.6 succeeds', async () => {
+      const { cookie } = await createTestUser('ladderTier3@example.com');
+      const modelsCalled = [];
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async ({ model }) => {
+            modelsCalled.push(model);
+            if (model === 'gemini-3.8-flash') {
+              const quotaErr = new Error('429 Resource has been exhausted (e.g. check quota).');
+              quotaErr.status = 429;
+              throw quotaErr;
+            }
+            if (model === 'gemini-3.7-flash') {
+              const demandErr = new Error('503 Service Unavailable: overloaded due to high demand');
+              demandErr.status = 503;
+              throw demandErr;
+            }
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      assert.equal(res.status, 201);
+      assert.deepEqual(modelsCalled, ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash']);
+      assert.equal(res.body.analysis.overallScore, 82);
+    });
+
+    test('advances past secondary model returning 404 (model unavailable in region) to next candidate in ladder', async () => {
+      const { cookie } = await createTestUser('ladder404Skip@example.com');
+      const modelsCalled = [];
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async ({ model }) => {
+            modelsCalled.push(model);
+            if (model === 'gemini-3.8-flash') {
+              const quotaErr = new Error('429 Quota exceeded');
+              quotaErr.status = 429;
+              throw quotaErr;
+            }
+            if (model === 'gemini-3.7-flash') {
+              const notFoundErr = new Error('NOT_FOUND: models/gemini-3.7-flash is not found for this project');
+              notFoundErr.status = 404;
+              throw notFoundErr;
+            }
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      assert.equal(res.status, 201);
+      assert.deepEqual(modelsCalled, ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash']);
+      assert.equal(res.body.analysis.overallScore, 82);
+    });
+
+    test('does NOT attempt fallback on 401 unauthorized / invalid API key and returns 502 without calling fallback model', async () => {
+      const { cookie } = await createTestUser('user401@example.com');
+      const modelsCalled = [];
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async ({ model }) => {
+            modelsCalled.push(model);
+            const authErr = new Error('API_KEY_INVALID: API key not valid. Please pass a valid API key.');
+            authErr.status = 401;
+            throw authErr;
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      assert.equal(res.status, 502);
+      assert.equal(res.body.error.code, 'AI_SERVICE_UNAVAILABLE');
+      // Must NOT attempt fallback model on non-retryable 401 error
+      assert.deepEqual(modelsCalled, ['gemini-3.8-flash']);
+    });
+
+    test('advances past primary model returning 404 (model unavailable in region) to secondary model in ladder and succeeds', async () => {
+      const { cookie } = await createTestUser('primary404@example.com');
+      const modelsCalled = [];
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async ({ model }) => {
+            modelsCalled.push(model);
+            if (model === 'gemini-3.8-flash') {
+              const notFoundErr = new Error('NOT_FOUND: models/gemini-3.8-flash is not found for this account/region');
+              notFoundErr.status = 404;
+              throw notFoundErr;
+            }
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      assert.equal(res.status, 201);
+      assert.deepEqual(modelsCalled, ['gemini-3.8-flash', 'gemini-3.7-flash']);
+      assert.equal(res.body.analysis.overallScore, 82);
+    });
+
+    test('does NOT attempt fallback on 403 permission denied and returns 502 without calling fallback model', async () => {
+      const { cookie } = await createTestUser('user403@example.com');
+      const modelsCalled = [];
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async ({ model }) => {
+            modelsCalled.push(model);
+            const permErr = new Error('PERMISSION_DENIED: The caller does not have permission');
+            permErr.status = 403;
+            throw permErr;
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      assert.equal(res.status, 502);
+      assert.equal(res.body.error.code, 'AI_SERVICE_UNAVAILABLE');
+      assert.deepEqual(modelsCalled, ['gemini-3.8-flash']);
+    });
+
+    test('does NOT attempt fallback on 400 invalid request / argument and returns 502 without calling fallback model', async () => {
+      const { cookie } = await createTestUser('user400@example.com');
+      const modelsCalled = [];
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async ({ model }) => {
+            modelsCalled.push(model);
+            const badReqErr = new Error('INVALID_ARGUMENT: contents cannot be empty');
+            badReqErr.status = 400;
+            throw badReqErr;
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      assert.equal(res.status, 502);
+      assert.equal(res.body.error.code, 'AI_SERVICE_UNAVAILABLE');
+      assert.deepEqual(modelsCalled, ['gemini-3.8-flash']);
+    });
+
+    test('does NOT attempt model fallback on generic 404 endpoint/path error without model evidence and halts immediately with 502 (1 call only)', async () => {
+      const { cookie } = await createTestUser('generic404@example.com');
+      const modelsCalled = [];
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async ({ model }) => {
+            modelsCalled.push(model);
+            const generic404Err = new Error('404 Not Found: Cannot POST /v1beta/invalid-path');
+            generic404Err.status = 404;
+            throw generic404Err;
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      assert.equal(res.status, 502);
+      assert.equal(res.body.error.code, 'AI_SERVICE_UNAVAILABLE');
+      // Generic 404 must NOT trigger ladder traversal to secondary models
+      assert.deepEqual(modelsCalled, ['gemini-3.8-flash']);
+    });
+
+    test('invokes Gemini generateContent with Gemini 3.8 compatible config: thinkingLevel low and no deprecated temperature', async () => {
+      const { cookie } = await createTestUser('geminiConfigCheck@example.com');
+      let capturedConfig = null;
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async ({ config }) => {
+            capturedConfig = config;
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      assert.equal(res.status, 201);
+      assert.ok(capturedConfig);
+      assert.equal(capturedConfig.responseMimeType, 'application/json');
+      assert.deepEqual(capturedConfig.thinkingConfig, { thinkingLevel: 'low' });
+      // Deprecated sampling parameters must NOT be sent
+      assert.equal(capturedConfig.temperature, undefined);
+      assert.equal(capturedConfig.topP, undefined);
+      assert.equal(capturedConfig.topK, undefined);
+    });
+
+    test('returns safe 502 AI_SERVICE_UNAVAILABLE when all candidate models in ladder fail (5 attempts total)', async () => {
+      const { cookie } = await createTestUser('userAllLadderFail@example.com');
+      const modelsCalled = [];
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async ({ model }) => {
+            modelsCalled.push(model);
+            const err = new Error('503 Service Unavailable');
+            err.status = 503;
+            throw err;
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      assert.equal(res.status, 502);
+      assert.equal(res.body.error.code, 'AI_SERVICE_UNAVAILABLE');
+      // All 5 candidate models in ladder attempted exactly once, then terminates safely
+      assert.deepEqual(modelsCalled, [
+        'gemini-3.8-flash',
+        'gemini-3.7-flash',
+        'gemini-3.6-flash',
+        'gemini-3.5-flash',
+        'gemini-3.5-flash-lite',
+      ]);
+    });
+
+    test('does NOT fabricate replacement placeholders when model returns too few array items (2 career suggestions) and rejects after bounded retry without saving to DB', async () => {
+      const { cookie } = await createTestUser('userTooFew@example.com');
+      let callCount = 0;
+
+      const tooFewSuggestionsResult = {
+        ...validAnalysisResult,
+        careerSuggestions: [
+          { role: 'Backend Developer', matchPercent: 85, reason: 'Good backend skills' },
+          { role: 'Full Stack Engineer', matchPercent: 80, reason: 'Good web skills' },
+        ], // Only 2 items; schema requires min(3)
+      };
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async () => {
+            callCount++;
+            return { text: JSON.stringify(tooFewSuggestionsResult) };
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      // Must fail with 502 because it must NOT fabricate fake 3rd suggestion
+      assert.equal(res.status, 502);
+      assert.equal(res.body.error.code, 'AI_SERVICE_UNAVAILABLE');
+
+      // Exactly 2 attempts: 1 initial attempt + 1 bounded schema-repair retry
+      assert.equal(callCount, 2);
+
+      // Verify no broken or fabricated analysis record was persisted to DB
+      const userAnalyses = await Analysis.find({});
+      assert.equal(userAnalyses.length, 0);
+    });
+
+    test('isRetryableError unit tests distinguish retryable vs non-retryable errors accurately', () => {
+      // Retryable
+      assert.equal(aiService.isRetryableError({ status: 429 }), true);
+      assert.equal(aiService.isRetryableError({ status: 503 }), true);
+      assert.equal(aiService.isRetryableError({ message: '503 Service Unavailable' }), true);
+      assert.equal(aiService.isRetryableError({ message: 'RESOURCE_EXHAUSTED' }), true);
+      assert.equal(aiService.isRetryableError({ message: 'Quota exceeded for quota metric' }), true);
+      assert.equal(aiService.isRetryableError({ message: 'overloaded due to high demand' }), true);
+      assert.equal(aiService.isRetryableError({ message: 'fetch failed' }), true);
+
+      // Non-retryable
+      assert.equal(aiService.isRetryableError({ status: 400 }), false);
+      assert.equal(aiService.isRetryableError({ status: 401 }), false);
+      assert.equal(aiService.isRetryableError({ status: 403 }), false);
+      assert.equal(aiService.isRetryableError({ status: 404 }), false);
+      assert.equal(aiService.isRetryableError({ message: 'API_KEY_INVALID' }), false);
+      assert.equal(aiService.isRetryableError({ message: 'PERMISSION_DENIED' }), false);
+      assert.equal(aiService.isRetryableError({ message: 'INVALID_ARGUMENT' }), false);
+      assert.equal(aiService.isRetryableError(null), false);
+    });
+
+    test('isModelNotFoundError distinguishes model-unavailable 404 from generic 404 and credentials errors', () => {
+      // Model-specific not found signals with model evidence -> true
+      assert.equal(aiService.isModelNotFoundError({ status: 404, message: 'models/gemini-3.8-flash is not found' }, 'gemini-3.8-flash'), true);
+      assert.equal(aiService.isModelNotFoundError({ status: 404, message: 'model does not exist: gemini-3.7-flash' }, 'gemini-3.7-flash'), true);
+      assert.equal(aiService.isModelNotFoundError({ status: 404, message: 'Requested model is not supported for this project' }, 'gemini-3.8-flash'), true);
+      assert.equal(aiService.isModelNotFoundError({ message: 'NOT_FOUND: models/gemini-3.8-flash is not found' }, 'gemini-3.8-flash'), true);
+
+      // Generic 404 WITHOUT model-specific evidence -> false
+      assert.equal(aiService.isModelNotFoundError({ status: 404, message: '404 Not Found: Cannot POST /v1beta/unknown' }, 'gemini-3.8-flash'), false);
+      assert.equal(aiService.isModelNotFoundError({ status: 404, message: 'Not Found' }, 'gemini-3.8-flash'), false);
+      assert.equal(aiService.isModelNotFoundError({ status: 404 }, 'gemini-3.8-flash'), false);
+
+      // Must NEVER treat bad credentials, permission denied, or invalid arguments as model not found
+      assert.equal(aiService.isModelNotFoundError({ status: 401, message: 'API_KEY_INVALID' }, 'gemini-3.8-flash'), false);
+      assert.equal(aiService.isModelNotFoundError({ status: 403, message: 'PERMISSION_DENIED' }, 'gemini-3.8-flash'), false);
+      assert.equal(aiService.isModelNotFoundError({ status: 400, message: 'INVALID_ARGUMENT' }, 'gemini-3.8-flash'), false);
+      assert.equal(aiService.isModelNotFoundError(null), false);
+    });
+
+    test('resolveModelChain orders candidate models according to defined quality/speed ladder', () => {
+      const chain = aiService.resolveModelChain();
+      assert.deepEqual(chain, [
+        'gemini-3.8-flash',
+        'gemini-3.7-flash',
+        'gemini-3.6-flash',
+        'gemini-3.5-flash',
+        'gemini-3.5-flash-lite',
+      ]);
+    });
+
+    test('CallBudget strictly enforces maxCalls and tracks deadline', () => {
+      const budget = new aiService.CallBudget({ maxCalls: 3, deadlineMs: 50000 });
+      assert.equal(budget.canCall(), true);
+      assert.equal(budget.remainingTimeMs() > 0, true);
+
+      budget.recordCall('gemini-3.8-flash');
+      assert.equal(budget.callsMade, 1);
+      assert.equal(budget.activeModel, 'gemini-3.8-flash');
+
+      budget.recordCall('gemini-3.7-flash');
+      budget.recordCall('gemini-3.6-flash');
+      assert.equal(budget.callsMade, 3);
+      assert.equal(budget.canCall(), false);
+
+      assert.throws(() => {
+        budget.recordCall('gemini-3.5-flash');
+      }, /AI attempt budget exceeded/);
+    });
+
+    test('CallBudget stops when deadline expires', () => {
+      // Simulate expired deadline
+      const budget = new aiService.CallBudget({ maxCalls: 5, deadlineMs: -1000 });
+      assert.equal(budget.canCall(), false);
+      assert.throws(() => {
+        budget.recordCall('gemini-3.8-flash');
+      }, /deadline reached/);
+    });
+
+    test('CallBudget canCall returns false and recordCall throws when less than 1000ms remains', () => {
+      // Buffer of 1000ms is required to initiate any call
+      const budget = new aiService.CallBudget({ maxCalls: 5, deadlineMs: 500 });
+      assert.equal(budget.remainingTimeMs() <= 500, true);
+      assert.equal(budget.canCall(1000), false);
+      assert.throws(() => {
+        budget.recordCall('gemini-3.8-flash');
+      }, /deadline reached/);
+    });
+
+    test('schema repair consumes a global call-budget slot and does not exceed configured attempt ceiling', () => {
+      const budget = new aiService.CallBudget({ maxCalls: 2, deadlineMs: 50000 });
+      assert.equal(budget.callsMade, 0);
+      assert.equal(budget.canCall(), true);
+
+      // Slot 1: initial generation call
+      budget.recordCall('gemini-3.8-flash');
+      assert.equal(budget.callsMade, 1);
+      assert.equal(budget.canCall(), true);
+
+      // Slot 2: schema repair call consumes second slot
+      budget.recordCall('gemini-3.8-flash');
+      assert.equal(budget.callsMade, 2);
+      assert.equal(budget.canCall(), false);
+
+      // A third attempt is strictly prevented by CallBudget
+      assert.throws(() => {
+        budget.recordCall('gemini-3.7-flash');
+      }, /AI attempt budget exceeded/);
+    });
+
+    test('schema repair is skipped when remaining deadline is less than 1000ms, returning 502 with 1 call only', async () => {
+      let calls = 0;
+
+      const budget = new aiService.CallBudget({ maxCalls: 5, deadlineMs: 50000 });
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async () => {
+            calls++;
+            // Simulate deadline expiring during call 1
+            budget.deadline = Date.now() + 500; // only 500ms remaining (< 1000ms buffer)
+            return { text: '{"invalid": true}' };
+          },
+        },
+      });
+
+      await assert.rejects(
+        aiService.analyzeResume(
+          {
+            resumeText: sampleResumeText,
+            targetRole: 'Senior Full Stack Engineer',
+          },
+          budget
+        ),
+        (err) => {
+          assert.equal(err.name, 'AiError');
+          assert.equal(err.code, 'AI_SERVICE_UNAVAILABLE');
+          return true;
+        }
+      );
+
+      // Schema repair must NOT be executed because deadline has expired
+      assert.equal(calls, 1);
+    });
+
+    test('model ladder skips call and returns 502 immediately when deadline has less than 1000ms remaining without inflating timeout', async () => {
+      let calls = 0;
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async () => {
+            calls++;
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
+
+      // Expired deadline: 0ms remaining (< 1000ms buffer)
+      const budget = new aiService.CallBudget({ maxCalls: 5, deadlineMs: -100 });
+
+      await assert.rejects(
+        aiService.analyzeResume(
+          {
+            resumeText: sampleResumeText,
+            targetRole: 'Senior Full Stack Engineer',
+          },
+          budget
+        ),
+        (err) => {
+          assert.equal(err.name, 'AiError');
+          assert.equal(err.code, 'AI_SERVICE_UNAVAILABLE');
+          return true;
+        }
+      );
+
+      // Zero calls made because deadline had already expired
+      assert.equal(calls, 0);
+    });
+
+    test('makes exactly 1 call to primary model on primary success without calling fallback', async () => {
+      const { cookie } = await createTestUser('primarySuccess@example.com');
+      const modelsCalled = [];
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async ({ model }) => {
+            modelsCalled.push(model);
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      assert.equal(res.status, 201);
+      assert.deepEqual(modelsCalled, ['gemini-3.8-flash']);
+      assert.equal(res.body.analysis.overallScore, 82);
+    });
+
+    test('recovers from initial schema validation error via single schema repair retry on same model (2 calls total)', async () => {
+      const { cookie } = await createTestUser('schemaRepairSuccess@example.com');
+      const modelsCalled = [];
+      let callCount = 0;
+
+      const invalidSchemaResult = {
+        ...validAnalysisResult,
+        careerSuggestions: [
+          { role: 'Backend Engineer', matchPercent: 80, reason: 'Good' },
+        ], // only 1 suggestion, schema requires min 3
+      };
+
+      aiService._setGenAiClient({
+        models: {
+          generateContent: async ({ model }) => {
+            modelsCalled.push(model);
+            callCount++;
+            if (callCount === 1) {
+              return { text: JSON.stringify(invalidSchemaResult) };
+            }
+            return { text: JSON.stringify(validAnalysisResult) };
+          },
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/analyses')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', cookie)
+        .send({
+          resumeText: sampleResumeText,
+          targetRole: 'Senior Full Stack Engineer',
+        });
+
+      assert.equal(res.status, 201);
+      assert.equal(callCount, 2);
+      assert.deepEqual(modelsCalled, ['gemini-3.8-flash', 'gemini-3.8-flash']);
+      assert.equal(res.body.analysis.overallScore, 82);
+    });
+
+    test('normalizeAiParsedJson rounds finite in-range floats to integers, preserves out-of-range values for Zod rejection, and does not invent missing fields', () => {
+      const input = {
+        overallScore: 82.6,
+        scoreBreakdown: {
+          skills: 85.2,
+          experience: 79.9,
+          formatting: 84.5,
+          impact: 77.1,
+        },
+      };
+
+      const normalized = aiService.normalizeAiParsedJson(input);
+      assert.equal(normalized.overallScore, 83);
+      assert.equal(normalized.scoreBreakdown.skills, 85);
+      assert.equal(normalized.scoreBreakdown.experience, 80);
+      assert.equal(normalized.scoreBreakdown.formatting, 85);
+      assert.equal(normalized.scoreBreakdown.impact, 77);
+
+      // Out-of-range scores (> 100 or < 0) are left unrounded so aiOutputSchema strictly catches and rejects them
+      const outOfRangeInput = {
+        overallScore: 105.4,
+        scoreBreakdown: {
+          skills: -2.3,
+          experience: 80,
+          formatting: 85,
+          impact: 75,
+        },
+      };
+      const normalizedOutOfRange = aiService.normalizeAiParsedJson(outOfRangeInput);
+      assert.equal(normalizedOutOfRange.overallScore, 105.4);
+      assert.equal(normalizedOutOfRange.scoreBreakdown.skills, -2.3);
+
+      // Missing field is NOT invented
+      const missingInput = { overallScore: 70 };
+      const normalizedMissing = aiService.normalizeAiParsedJson(missingInput);
+      assert.equal(normalizedMissing.scoreBreakdown, undefined);
+    });
+
+    test('SDK configuration with retryOptions.attempts: 1 prevents internal HTTP retries on 429 quota exhaustion', async () => {
+      const { GoogleGenAI } = require('@google/genai');
+      let fetchAttempts = 0;
+      const fetchHistory = [];
+
+      const mockFetch = async (url) => {
+        fetchAttempts++;
+        const urlStr = url.toString();
+        const model = urlStr.includes('gemini-3.8-flash')
+          ? 'gemini-3.8-flash'
+          : urlStr.includes('gemini-3.5-flash')
+          ? 'gemini-3.5-flash'
+          : 'unknown';
+        fetchHistory.push({ attempt: fetchAttempts, model });
+
+        // Simulate 429 quota exhaustion
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: 429,
+              message: 'RESOURCE_EXHAUSTED: Quota exceeded for quota metric GenerateRequestsPerDayPerProjectPerModel-FreeTier',
+              status: 'RESOURCE_EXHAUSTED',
+            },
+          }),
+          { status: 429, headers: { 'Content-Type': 'application/json' } }
+        );
+      };
+
+      // Client configured identically to ai.service.js getGenAiClient
+      const client = new GoogleGenAI({
+        apiKey: 'test_key',
+        httpOptions: {
+          retryOptions: { attempts: 1 },
+          fetch: mockFetch,
+        },
+      });
+
+      // Call primary model
+      let primaryErr;
+      try {
+        await client.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: 'Analyze this resume',
+        });
+      } catch (err) {
+        primaryErr = err;
+      }
+
+      // Assert that exactly 1 HTTP transport attempt was made (not 5)
+      assert.ok(primaryErr);
+      assert.equal(fetchAttempts, 1);
+      assert.equal(fetchHistory[0].model, 'gemini-3.8-flash');
+      assert.equal(aiService.isRetryableError(primaryErr), true);
+
+      // Verify that after catching 429, invoking fallback model makes exactly 1 HTTP transport attempt
+      let fallbackErr;
+      try {
+        await client.models.generateContent({
+          model: 'gemini-3.5-flash',
+          contents: 'Analyze this resume',
+        });
+      } catch (err) {
+        fallbackErr = err;
+      }
+
+      assert.ok(fallbackErr);
+      assert.equal(fetchAttempts, 2);
+      assert.equal(fetchHistory[1].model, 'gemini-3.5-flash');
+
+      // Proves: Total HTTP network attempts across primary 429 failure + fallback model = exactly 2!
+    });
+
+    test('35-second abort signal cancels pending fetch immediately without waiting for backoff or hanging', async () => {
+      const { GoogleGenAI } = require('@google/genai');
+      const controller = new AbortController();
+      const startTime = Date.now();
+
+      // Trigger abort after 100ms
+      setTimeout(() => controller.abort(), 100);
+
+      const client = new GoogleGenAI({
+        apiKey: 'test_key',
+        httpOptions: {
+          retryOptions: { attempts: 1 },
+          fetch: async (_url, opts) => {
+            return new Promise((_, reject) => {
+              opts.signal.addEventListener('abort', () => {
+                reject(new Error('AbortError: signal timed out'));
+              });
+            });
+          },
+        },
+      });
+
+      let caughtErr;
+      try {
+        await client.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: 'Long running prompt',
+          config: {
+            abortSignal: controller.signal,
+          },
+        });
+      } catch (err) {
+        caughtErr = err;
+      }
+
+      const elapsed = Date.now() - startTime;
+      assert.ok(caughtErr);
+      // Confirms abort stopped the call immediately (~100-300ms, well below 35s)
+      assert.ok(elapsed < 1000, `Expected abort in <1000ms, took ${elapsed}ms`);
     });
   });
 

@@ -8,8 +8,6 @@ import {
   Upload,
   User,
   ShieldCheck,
-  Sparkles,
-  AlertCircle,
   CheckCircle2,
   ArrowRight,
   Target,
@@ -117,6 +115,8 @@ export default function NewAnalysis() {
         setFileError('Please select a PDF document to evaluate.');
         return false;
       }
+    } else if (source === 'profile') {
+      // Target role is checked above; backend validates profile completeness
     } else {
       if (!resumeText.trim()) {
         setFormError('Resume content is required. Please provide your qualifications.');
@@ -149,12 +149,17 @@ export default function NewAnalysis() {
         if (jobDescription.trim()) {
           formData.append('jobDescription', jobDescription.trim());
         }
-        res = await api.analyses.createMultipart(formData);
+        res = await api.analyses.create(formData);
+      } else if (source === 'profile') {
+        res = await api.analyses.createFromProfile({
+          targetRole: targetRole.trim() || undefined,
+          ...(jobDescription.trim() ? { jobDescription: jobDescription.trim() } : {}),
+        });
       } else {
         const payload = {
           resumeText: resumeText.trim(),
           targetRole: targetRole.trim(),
-          resumeSource: source,
+          resumeSource: 'paste',
           ...(jobDescription.trim() ? { jobDescription: jobDescription.trim() } : {}),
         };
         res = await api.analyses.create(payload);
@@ -184,6 +189,7 @@ export default function NewAnalysis() {
           borderBottom: '1px solid rgba(77, 31, 39, 0.1)',
         }}
       >
+
 
         <h1
           style={{

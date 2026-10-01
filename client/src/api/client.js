@@ -4,7 +4,8 @@
  * and manages 401 unauthorized session transitions.
  */
 
-const API_BASE = import.meta.env.VITE_API_URL || '/api';
+const rawBase = (import.meta.env.VITE_API_URL || '/api').trim().replace(/\/+$/, '');
+const API_BASE = rawBase.endsWith('/api') ? rawBase : `${rawBase}/api`;
 
 class ApiError extends Error {
   constructor(message, status, code = 'API_ERROR', details = null) {
@@ -117,11 +118,18 @@ export const api = {
         body: JSON.stringify(data),
       });
     },
-    createFromProfile: (data = {}) =>
-      request('/analyses/profile', {
+    createMultipart: (formData) => {
+      return request('/analyses', {
+        method: 'POST',
+        body: formData,
+      });
+    },
+    createFromProfile: (data = {}) => {
+      return request('/analyses/profile', {
         method: 'POST',
         body: JSON.stringify(data),
-      }),
+      });
+    },
     list: (params = {}) => {
       const query = new URLSearchParams();
       Object.entries(params).forEach(([key, value]) => {
