@@ -19,8 +19,8 @@
 | **Analysis History (`GET /api/analyses`)** | **Completed & Verified** | Supports role regex, min/max score, date range (`from`/`to`), sorting, pagination. Lightweight summaries. |
 | **Analysis Detail (`GET /api/analyses/:id`)**| **Completed & Verified** | Returns full analysis with `result` payload. Strips raw `resumeText` and `jobDescription`. |
 | **Analysis Delete (`DELETE /api/analyses/:id`)**| **Completed & Verified** | Returns `204 No Content`. Scoped to `req.user.id`. |
-| **Gemini Fallback (`ai.service.js`)** | **Completed & Tested (Mocked)** | Single bounded fallback from `gemini-3.8-flash` to `gemini-3.5-flash` on 503 spikes. |
-| **Automated Test Suite** | **69 / 69 Passing (15 Suites)** | 100% offline via in-memory MongoDB (`mongodb-memory-server`) & mocked AI. |
+| **Gemini Fallback (`ai.service.js`)** | **Completed & Tested (Mocked)** | Single bounded fallback from `gemini-3.8-flash` to `gemini-3.5-flash` on 503 high-demand or 429 quota spikes. |
+| **Automated Test Suite** | **81 / 81 Passing (15 Suites)** | 100% offline via in-memory MongoDB (`mongodb-memory-server`) & mocked AI. |
 | **Local Demo Seeder (`seed:demo`)** | **Completed & Guard-Tested** | Pre-computes 3 synthetic analyses offline with loopback protection and one-time password generation. |
 | **Browser Cookie Persistence** | **Pending Live Integration** | Automated test suite passes; cross-site cookie retention across refreshes remains untested and must be verified in a real browser after deployment. |
 

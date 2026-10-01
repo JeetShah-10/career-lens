@@ -143,7 +143,7 @@ Wrong password · duplicate email · expired/invalid token · invalid form input
 | Frontend | React + Vite, React Router, Axios or fetch wrapper, a chart library (Recharts) for score breakdown/trend, plain CSS or Tailwind `[TEAM TO CONFIRM]` |
 | Backend | Node.js, Express, `zod`, `jsonwebtoken`, `bcryptjs`, `helmet`, `cors`, `express-rate-limit`, `multer`, `pdf-parse`, `dotenv` |
 | Database | MongoDB Atlas + Mongoose (default) |
-| AI | Google Gemini API, stable Flash model, configured with `GEMINI_API_KEY` and `GEMINI_MODEL` |
+| AI | Google Gemini API, stable Flash model, configured with `GEMINI_API_KEY`, `GEMINI_MODEL` (default `gemini-3.8-flash`), and single bounded fallback `GEMINI_FALLBACK_MODEL` (`gemini-3.5-flash`) |
 | Deploy | Frontend: Vercel · Backend: Render · DB: Atlas |
 
 ### Suggested structure
@@ -349,9 +349,11 @@ Register → fill profile → paste a weak resume + target role → show a low s
 
 Primary is Gemini because its current stable `gemini-3.8-flash` model supports schema-constrained JSON output and Google AI Studio is quick to provision. Google describes it as its most intelligent Flash model. Free-tier RPM/TPM/RPD limits depend on project and model and can change; Google does not guarantee actual capacity. The Free tier has no spend-based rate limit, but request/token limits still apply.
 
+The implemented runtime service in `server/src/services/ai.service.js` uses `gemini-3.8-flash` (`GEMINI_MODEL`) as primary and performs a single bounded fallback to `gemini-3.5-flash` (`GEMINI_FALLBACK_MODEL`) on 503 high-demand or 429 quota exhaustion events. Both models enforce identical Zod validation.
+
 Recommended fallback provider: Groq with `openai/gpt-oss-20b`, which offers strict JSON Schema output and an OpenAI-compatible Node SDK. Groq's published Free plan currently lists 30 RPM and 1,000 requests/day for this model; token caps apply too, and account limits can vary, so confirm the live limits. Because this project explicitly keeps one AI provider in scope, provision the Groq key as a contingency but do not implement provider switching unless the team deliberately moves it into P0. Until then, use a pre-generated fake-resume result or recording if Gemini is unavailable. Hugging Face Inference Providers gives free accounts currently $0.10 monthly routed credit, so it is not a reliable fallback for the live demo.
 
-To obtain the primary key: sign in to [Google AI Studio API Keys](https://aistudio.google.com/app/apikey), accept the terms, choose/import a project, create a Gemini-restricted/auth key, and check the project's model limits. Put the value in server-only `GEMINI_API_KEY` in ignored `.env` locally and the deployment secret settings. Set `GEMINI_MODEL=gemini-3.8-flash`. Never put either value in React, a `VITE_` variable, source control, screenshots, or chat. Keep `.env.example` names/placeholders only. For the fallback, create a key at [Groq Console](https://console.groq.com/keys), inspect its live limits, and keep it only in a server secret as `GROQ_API_KEY`; no need to connect it during the initial build.
+To obtain the primary key: sign in to [Google AI Studio API Keys](https://aistudio.google.com/app/apikey), accept the terms, choose/import a project, create a Gemini-restricted/auth key, and check the project's model limits. Put the value in server-only `GEMINI_API_KEY` in ignored `.env` locally and the deployment secret settings. Set `GEMINI_MODEL=gemini-3.8-flash` and `GEMINI_FALLBACK_MODEL=gemini-3.5-flash`. Never put either value in React, a `VITE_` variable, source control, screenshots, or chat. Keep `.env.example` names/placeholders only. For the fallback, create a key at [Groq Console](https://console.groq.com/keys), inspect its live limits, and keep it only in a server secret as `GROQ_API_KEY`; no need to connect it during the initial build.
 
 Official references: [Gemini structured output](https://ai.google.dev/gemini-api/docs/structured-output), [Gemini rate limits](https://ai.google.dev/gemini-api/docs/rate-limits), [Gemini API key management](https://ai.google.dev/gemini-api/docs/api-key), [Groq structured outputs](https://console.groq.com/docs/structured-outputs), [Groq rate limits](https://console.groq.com/docs/rate-limits), [Hugging Face Inference Providers pricing](https://huggingface.co/docs/inference-providers/en/pricing).
 
