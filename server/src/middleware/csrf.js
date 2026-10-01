@@ -14,6 +14,14 @@ function csrfProtection(req, res, next) {
     return next();
   }
 
+  // In development, allow localhost and 127.0.0.1 seamlessly
+  if (env.NODE_ENV === 'development') {
+    const isDevLocal = (url) => url && (url.includes('localhost') || url.includes('127.0.0.1'));
+    if (isDevLocal(req.headers.origin) || isDevLocal(req.headers.referer)) {
+      return next();
+    }
+  }
+
   const origin = req.headers.origin;
   const referer = req.headers.referer;
   const hasAuthCookie = Boolean(

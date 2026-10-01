@@ -1,0 +1,280 @@
+[
+  {
+    "id": "cand-01",
+    "name": "Aarav Patel",
+    "avatar": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80",
+    "headline": "Senior Full-Stack Engineer | Distributed Systems & React Ecosystem",
+    "targetRole": "Software Engineer",
+    "category": "Technology",
+    "experienceLevel": "Senior (6+ Years)",
+    "overallScore": 92,
+    "createdAt": "2026-09-28T14:32:00.000Z",
+    "resumeText": "AARAV PATEL\nSenior Full-Stack Software Engineer\nEmail: aarav.patel@example.com | Bengaluru, India | LinkedIn: linkedin.com/in/aarav-patel\n\nPROFESSIONAL SUMMARY\nHigh-impact Full-Stack Engineer with 6+ years of experience designing scalable microservices and resilient React web applications. Proven track record reducing API latency by 38% and leading engineering teams delivering cloud-native platforms handling 100K+ daily active users.\n\nTECHNICAL SKILLS\n- Languages: JavaScript (ES6+), TypeScript, Python, SQL, Go\n- Frontend: React, Next.js, Redux Toolkit, Tailwind CSS, Webpack\n- Backend: Node.js, Express, FastAPI, PostgreSQL, Redis, MongoDB\n- Cloud & DevOps: AWS (ECS, Lambda, S3, RDS), Docker, CI/CD (GitHub Actions), Terraform\n- Architecture: REST APIs, Event-Driven Architecture, Microservices, System Design\n\nPROFESSIONAL EXPERIENCE\nSenior Software Engineer | TechMatrix Solutions (2022 - Present)\n- Engineered core distributed checkout and billing microservices utilizing Node.js, Express, and Redis caching, cutting average p99 latency from 420ms to 180ms.\n- Spearheaded the frontend architectural migration of legacy SPA to Next.js 14 and TypeScript, boosting Core Web Vitals and organic SEO engagement by 45%.\n- Mentored 4 junior engineers, established automated linting/test gates with Jest and Cypress, elevating team code coverage from 58% to 89%.\n\nSoftware Engineer | FinFlow Systems (2019 - 2022)\n- Built real-time financial reporting dashboards using React, D3.js, and WebSocket streaming for enterprise treasury desks.\n- Designed and implemented 20+ secure RESTful APIs adhering to OAuth2 and JWT standards with zero critical CVE disclosures over 3 years.\n- Optimized PostgreSQL query indexing and read-replicas, accommodating a 4x surge in daily transactional volumes.\n\nEDUCATION\nB.Tech in Computer Science & Engineering | National Institute of Technology (2015 - 2019)\nGraduated with First Class Distinction (CGPA: 8.8 / 10.0)",
+    "jobDescription": "We are seeking a Senior Software Engineer to design resilient distributed services and customer-facing interfaces. Requirements: 5+ years building production web apps with React, TypeScript, Node.js, PostgreSQL, Docker, and AWS. Strong mastery of system design, performance profiling, and engineering mentorship.",
+    "result": {
+      "overallScore": 92,
+      "scoreBreakdown": {
+        "skills": 95,
+        "experience": 92,
+        "formatting": 94,
+        "impact": 88
+      },
+      "summary": "Exceptional senior engineering candidate demonstrating clear ownership of scalable backend microservices and modern React frontend architectures. Strong metric-backed achievements (38% latency reduction, 45% SEO boost) and leadership qualities.",
+      "strengths": [
+        "Proven quantitative impact with concrete latency and coverage metrics",
+        "Deep technical synergy across modern TypeScript, Next.js, Node.js, and PostgreSQL",
+        "Clear mentorship track record and production DevOps tooling experience"
+      ],
+      "weaknesses": [
+        "Could emphasize more hands-on Kubernetes cluster orchestration experience",
+        "Limited mention of distributed consensus algorithms or multi-region disaster recovery"
+      ],
+      "missingSkills": [
+        "Kubernetes",
+        "Kafka",
+        "gRPC"
+      ],
+      "recommendedSkills": [
+        {
+          "skill": "Kubernetes Orchestration",
+          "priority": "high",
+          "why": "Essential for containerized production scaling and cloud infrastructure reliability."
+        },
+        {
+          "skill": "Apache Kafka & Event Streaming",
+          "priority": "medium",
+          "why": "Will enhance high-throughput asynchronous communication between microservices."
+        },
+        {
+          "skill": "gRPC & Protocol Buffers",
+          "priority": "low",
+          "why": "Optimizes inter-service RPC latency compared to standard HTTP REST endpoints."
+        }
+      ],
+      "careerSuggestions": [
+        {
+          "role": "Staff Software Architect",
+          "matchPercent": 94,
+          "reason": "Strong end-to-end full-stack capabilities, system design mastery, and team leadership experience."
+        },
+        {
+          "role": "Engineering Manager",
+          "matchPercent": 88,
+          "reason": "Demonstrated mentorship and engineering standard improvements make you a natural fit for technical management."
+        },
+        {
+          "role": "Cloud DevOps Architect",
+          "matchPercent": 82,
+          "reason": "Proven containerization, CI/CD, and AWS infrastructure background provides a rapid pathway into platform engineering."
+        }
+      ]
+    }
+  },
+  {
+    "id": "cand-02",
+    "name": "Priya Nair",
+    "avatar": "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=200&q=80",
+    "headline": "Data Analyst & Emerging Data Scientist | Python, SQL & Machine Learning",
+    "targetRole": "Data Scientist",
+    "category": "Data & AI",
+    "experienceLevel": "Mid-Level (3+ Years)",
+    "overallScore": 79,
+    "createdAt": "2026-09-24T10:15:00.000Z",
+    "resumeText": "PRIYA NAIR\nData Analyst & Aspiring Data Scientist\nEmail: priya.nair@example.com | Mumbai, India | Portfolio: priyanair.dev\n\nPROFESSIONAL SUMMARY\nAnalytical Data Specialist with 3+ years experience converting messy raw datasets into actionable predictive forecasts and business intelligence. Skilled in Python, SQL, statistical hypothesis testing, and scikit-learn machine learning pipelines.\n\nTECHNICAL SKILLS\n- Languages & DBs: Python, SQL (PostgreSQL, BigQuery), R\n- Libraries: Pandas, NumPy, Scikit-Learn, Matplotlib, Seaborn, Statsmodels\n- BI & Visualization: Tableau, Power BI, Excel (Advanced VBA)\n- Concepts: Regression, Classification, Customer Churn Modeling, A/B Testing, Feature Engineering\n\nPROFESSIONAL EXPERIENCE\nData Analyst | Omnichannel Retail Labs (2023 - Present)\n- Developed a customer churn classification model in scikit-learn yielding 81% precision, allowing marketing to salvage ₹1.2Cr in annual recurring subscription revenue.\n- Automated weekly ETL data pipelines using Python and Google BigQuery, reducing manual reporting workload by 15 hours per week.\n- Conducted rigorous A/B tests on e-commerce promotional banners, statistically validating a 14% lift in checkout conversion rates.\n\nJunior Business Analyst | Horizon Insights (2021 - 2023)\n- Created 12+ executive Power BI dashboards monitoring inventory churn, freight delays, and supplier SLA performance across 40 regional warehouses.\n- Queried multi-million row SQL databases to troubleshoot discrepancies in cross-border duty payments.\n\nEDUCATION\nB.Sc. in Statistics & Computer Applications | University of Mumbai (2018 - 2021)\nDistinction Honors",
+    "jobDescription": "Looking for a Data Scientist to build production predictive models, deep learning NLP/CV solutions, and scalable feature stores. Requirements: Strong proficiency in Python, ML algorithms, PyTorch/TensorFlow, model deployment (FastAPI/Docker), and statistical inference.",
+    "result": {
+      "overallScore": 79,
+      "scoreBreakdown": {
+        "skills": 82,
+        "experience": 76,
+        "formatting": 85,
+        "impact": 74
+      },
+      "summary": "Strong analytical foundation with impressive business impact in churn modeling and automated ETL. To fully qualify for a Senior Data Scientist title, the candidate should expand into deep learning frameworks (PyTorch/TensorFlow) and containerized model deployment.",
+      "strengths": [
+        "Proven quantitative business impact with revenue preservation figures",
+        "Strong fundamentals in classical machine learning, A/B testing, and feature engineering",
+        "Solid statistical rigor backed by a formal B.Sc. in Statistics"
+      ],
+      "weaknesses": [
+        "Absence of deep learning frameworks (TensorFlow / PyTorch) on the resume",
+        "No explicit mention of production model serving (Docker, MLflow, Kubernetes)",
+        "Relies heavily on tabular analytics rather than unstructured data processing"
+      ],
+      "missingSkills": [
+        "PyTorch",
+        "TensorFlow",
+        "Docker",
+        "MLflow",
+        "FastAPI"
+      ],
+      "recommendedSkills": [
+        {
+          "skill": "PyTorch Deep Learning",
+          "priority": "high",
+          "why": "Critical industry standard for neural networks and modern foundational AI models."
+        },
+        {
+          "skill": "Docker & Model Serving (FastAPI)",
+          "priority": "high",
+          "why": "Bridges the gap between Jupyter notebooks and live software production systems."
+        },
+        {
+          "skill": "MLflow & Experiment Tracking",
+          "priority": "medium",
+          "why": "Standardizes model versioning, hyperparameter sweeps, and reproducibility."
+        }
+      ],
+      "careerSuggestions": [
+        {
+          "role": "Lead Data Analyst",
+          "matchPercent": 93,
+          "reason": "Immediate senior fit given your SQL mastery, ETL automation, and proven commercial A/B testing capabilities."
+        },
+        {
+          "role": "Data Scientist",
+          "matchPercent": 79,
+          "reason": "Strong mathematical base and classical scikit-learn experience; close the gap with containerized deployment."
+        },
+        {
+          "role": "Business Intelligence Engineer",
+          "matchPercent": 88,
+          "reason": "Demonstrated mastery of Power BI, BigQuery, and cross-functional reporting across complex operations."
+        }
+      ]
+    }
+  },
+  {
+    "id": "cand-03",
+    "name": "Rohan Mehta",
+    "avatar": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80",
+    "headline": "Junior Frontend Developer | React, JavaScript & CSS UI Systems",
+    "targetRole": "Frontend Developer",
+    "category": "Technology",
+    "experienceLevel": "Junior (1-2 Years)",
+    "overallScore": 65,
+    "createdAt": "2026-09-18T09:00:00.000Z",
+    "resumeText": "ROHAN MEHTA\nJunior Frontend Developer\nEmail: rohan.mehta@example.com | Pune, India\n\nPROFILE\nPassionate Junior Developer with 1.5 years experience crafting web pages with React, JavaScript, HTML5, and CSS3. Enthusiastic about user experience and responsive design.\n\nSKILLS\n- Languages: JavaScript, HTML5, CSS3\n- Frameworks: React, Bootstrap, Tailwind CSS\n- Tools: Git, VS Code, npm, Figma\n\nEXPERIENCE\nJunior Web Developer | PixelCraft Studio (2024 - Present)\n- Built 6 marketing landing pages using React and Tailwind CSS.\n- Fixed UI layout bugs across mobile and desktop browser viewports.\n- Collaborated with designers to implement typography and button styles.\n\nFrontend Intern | AlphaTech (2023 - 2024)\n- Assisted in creating reusable UI components in React.\n- Integrated mock REST APIs using fetch and Axios.\n\nEDUCATION\nDiploma in Computer Engineering | Pune Polytechnic (2020 - 2023)",
+    "jobDescription": "Seeking a Mid/Senior Frontend Developer to engineer complex web applications with TypeScript, Next.js, state management, automated testing, and web performance optimization.",
+    "result": {
+      "overallScore": 65,
+      "scoreBreakdown": {
+        "skills": 68,
+        "experience": 58,
+        "formatting": 74,
+        "impact": 56
+      },
+      "summary": "Promising entry-level developer with practical UI foundation in React and Tailwind CSS. The profile currently lacks evidence of TypeScript, state management architectures, automated testing, or metric-based project outcomes.",
+      "strengths": [
+        "Solid grasp of fundamental HTML, CSS, and basic React component workflows",
+        "Clean, legible resume format without distracting graphics",
+        "Active hands-on agency internship experience"
+      ],
+      "weaknesses": [
+        "Missing TypeScript which is mandatory for modern frontend positions",
+        "No automated testing frameworks (Jest, Vitest, Playwright) listed",
+        "Bullet points lack quantifiable metrics or performance impact numbers"
+      ],
+      "missingSkills": [
+        "TypeScript",
+        "Next.js",
+        "Jest / Vitest",
+        "State Management (Redux/Zustand)",
+        "Web Performance Optimization"
+      ],
+      "recommendedSkills": [
+        {
+          "skill": "TypeScript",
+          "priority": "high",
+          "why": "Standard in 85%+ of enterprise React repositories for compile-time safety."
+        },
+        {
+          "skill": "Next.js & Server Components",
+          "priority": "high",
+          "why": "Modern web industry default for production full-stack React systems."
+        },
+        {
+          "skill": "Automated Unit Testing (Vitest/Jest)",
+          "priority": "medium",
+          "why": "Essential to prove your code reliability and pass technical screenings."
+        }
+      ],
+      "careerSuggestions": [
+        {
+          "role": "Frontend Developer",
+          "matchPercent": 65,
+          "reason": "Good baseline with React; master TypeScript and testing to advance to mid-level roles."
+        },
+        {
+          "role": "Web Developer",
+          "matchPercent": 78,
+          "reason": "Strong match for website agencies, landing page creation, and CMS template engineering."
+        },
+        {
+          "role": "UI Engineer / Design Technologist",
+          "matchPercent": 72,
+          "reason": "Strong affinity for CSS, Tailwind, and translating Figma designs into interactive prototypes."
+        }
+      ]
+    }
+  },
+  {
+    "id": "cand-04",
+    "name": "Dr. Ananya Sen",
+    "avatar": "https://images.unsplash.com/photo-1594824813511-58d042609071?auto=format&fit=crop&w=200&q=80",
+    "headline": "Lead Cybersecurity Analyst & Threat Intelligence Specialist",
+    "targetRole": "Cybersecurity Analyst",
+    "category": "Cybersecurity",
+    "experienceLevel": "Lead (7+ Years)",
+    "overallScore": 95,
+    "createdAt": "2026-09-12T16:45:00.000Z",
+    "resumeText": "DR. ANANYA SEN, CISSP, CEH\nLead Cybersecurity Specialist & Threat Intelligence Architect\nEmail: ananya.sen@example.com | Hyderabad, India\n\nEXECUTIVE PROFILE\nCybersecurity leader with 7+ years directing Security Operations Centers (SOC), incident response war-rooms, and automated vulnerability management. Successfully defended financial enterprise networks against 1,200+ hostile intrusion attempts with zero unauthorized data exfiltration incidents.\n\nCERTIFICATIONS & SKILLS\n- Certifications: CISSP, CEH, CompTIA Security+, AWS Certified Security Specialty\n- Core Competencies: Threat Hunting, Incident Response, SIEM (Splunk, Sentinel), Zero-Trust Architecture\n- Technical Tooling: Wireshark, Snort, Zeek, Kali Linux, Python Automation, Suricata, Metasploit\n\nEXPERIENCE\nLead Security Engineer | Apex Financial Corp (2021 - Present)\n- Direct a 24/7 SOC team of 8 Tier-2/3 analysts mitigating malware, ransomware, and credential stuffing attacks.\n- Automated threat triage with Python scripts and Splunk SOAR, trimming mean time to acknowledge (MTTA) from 45 min to under 4 min.\n- Conducted biannual adversary simulation exercises (Red/Blue teaming) covering 5,000+ employee endpoints.\n\nSenior Security Analyst | CyberGuard Defense (2018 - 2021)\n- Configured enterprise firewalls, IDS/IPS signatures, and endpoint detection response (EDR) across 12 regional data centers.\n- Drafted comprehensive ISO 27001 and NIST compliance documentation, clearing regulatory bank audits with 100% compliance.\n\nEDUCATION\nPh.D. in Information Security | Indian Institute of Technology (2014 - 2018)",
+    "jobDescription": "Seeking Lead Cybersecurity Analyst to oversee enterprise threat detection, incident triage, and cloud security architecture.",
+    "result": {
+      "overallScore": 95,
+      "scoreBreakdown": {
+        "skills": 98,
+        "experience": 96,
+        "formatting": 92,
+        "impact": 94
+      },
+      "summary": "World-class cybersecurity expert possessing premier credentials (CISSP, CEH, Ph.D.), deep incident-response experience, and verifiable leadership metrics (MTTA reduced from 45m to <4m).",
+      "strengths": [
+        "Gold-standard certifications (CISSP, CEH, AWS Security)",
+        "Proven SOC leadership with dramatic quantifiable response time reductions",
+        "Comprehensive coverage of both offensive and defensive cybersecurity domains"
+      ],
+      "weaknesses": [
+        "Could expand on cloud-native container security tooling (e.g. Falco, Trivy, eBPF telemetry)"
+      ],
+      "missingSkills": [
+        "eBPF Telemetry",
+        "Falco Cloud Security"
+      ],
+      "recommendedSkills": [
+        {
+          "skill": "eBPF & Kernel-Level Observability",
+          "priority": "medium",
+          "why": "Emerging standard for zero-overhead container and Kubernetes network threat telemetry."
+        }
+      ],
+      "careerSuggestions": [
+        {
+          "role": "Chief Information Security Officer (CISO)",
+          "matchPercent": 96,
+          "reason": "Executive leadership, elite credentials, and proven regulatory audit success."
+        },
+        {
+          "role": "Cybersecurity Analyst",
+          "matchPercent": 98,
+          "reason": "Unquestioned technical master across all threat intelligence and incident response requirements."
+        },
+        {
+          "role": "Cloud Security Architect",
+          "matchPercent": 91,
+          "reason": "Deep networking and AWS security certification provides immediate cloud defense mastery."
+        }
+      ]
+    }
+  }
+]

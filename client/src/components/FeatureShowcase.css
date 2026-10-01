@@ -1,0 +1,291 @@
+/* Feature Showcase Sticky Tabs - Based on Codepen p0waqqatsi/pen/wvbzQxj */
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=SF+Mono&display=swap');
+
+:root {
+  --showcase-canvas: #faf7f2;
+  --showcase-burgundy: #4d1f27;
+  --showcase-burgundy-dark: #38131a;
+  --showcase-card-bg: #211a1c;
+  --showcase-card-left: #2d2326;
+  --showcase-accent: #fbd38d;
+  --showcase-border: #42363a;
+}
+
+.feature-showcase-wrapper {
+  position: relative;
+  width: 100%;
+  background-color: var(--showcase-canvas);
+  box-sizing: border-box;
+}
+
+/* Intro Section */
+.feature-showcase-intro {
+  padding: 6rem 2rem 4rem;
+  text-align: center;
+  max-width: 780px;
+  margin: 0 auto;
+}
+
+.feature-showcase-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: #4d1f27;
+  text-transform: uppercase;
+  background: rgba(77, 31, 39, 0.08);
+  padding: 5px 14px;
+  border-radius: 20px;
+  margin-bottom: 1.25rem;
+}
+
+.feature-showcase-heading {
+  font-family: 'Taberna', 'Taberna Serif', 'Playfair Display', serif;
+  font-size: clamp(2.2rem, 4.2vw, 3.4rem);
+  font-weight: 500;
+  color: #4d1f27;
+  line-height: 1.15;
+  margin: 0 0 1.25rem;
+}
+
+.feature-showcase-subtext {
+  font-size: 1.05rem;
+  color: #574f4b;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Sticky Runway: scrolling through this height transitions the tabs */
+.feature-showcase-runway {
+  position: relative;
+  height: 440vh;
+}
+
+.feature-showcase-sticky-frame {
+  position: sticky;
+  top: 5vh;
+  height: 90vh;
+  max-height: 840px;
+  padding: 0 2rem;
+  box-sizing: border-box;
+}
+
+.feature-showcase-container {
+  width: 100%;
+  max-width: 1200px;
+  height: 100%;
+  margin: 0 auto;
+  border-radius: 28px;
+  background-color: #211a1c; /* Luxury deep velvet espresso dark card */
+  box-shadow: 0 32px 80px rgba(77, 31, 39, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 0.42fr 1fr;
+  padding: 1.75rem;
+  gap: 1.75rem;
+  box-sizing: border-box;
+}
+
+/* Left Content Column */
+.feature-showcase-left {
+  background-color: #2d2326;
+  border-radius: 20px;
+  padding: 2.25rem 2rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  position: relative;
+  overflow: hidden;
+}
+
+.feature-showcase-tabs-stack {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.feature-tab-item {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1.25rem;
+  opacity: 0;
+  transform: translateY(20px);
+  pointer-events: none;
+  transition: opacity 0.45s cubic-bezier(0.16, 1, 0.3, 1), transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.feature-tab-item.active {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.feature-tab-counter {
+  font-family: 'SF Mono', monospace;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #fbd38d;
+  letter-spacing: 0.08em;
+}
+
+.feature-tab-title {
+  font-family: 'Taberna', 'Taberna Serif', 'Playfair Display', serif;
+  font-size: clamp(1.6rem, 2.2vw, 2.2rem);
+  font-weight: 500;
+  color: #ffffff;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.feature-tab-highlight {
+  color: #fbd38d;
+}
+
+.feature-tab-divider {
+  width: 100%;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.feature-tab-desc {
+  font-size: 0.92rem;
+  color: rgba(255, 255, 255, 0.72);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Codepen Animated Button with Morphing Circular Icon */
+.feature-showcase-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #faf7f2;
+  color: #4d1f27;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  padding: 0.85rem 1.35rem;
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  overflow: hidden;
+  position: relative;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.feature-showcase-btn:hover {
+  background-color: #fbd38d;
+  color: #211a1c;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(251, 211, 141, 0.3);
+}
+
+.feature-showcase-btn-icon-wrapper {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #4d1f27;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+.feature-showcase-btn:hover .feature-showcase-btn-icon-wrapper {
+  background: #211a1c;
+  transform: translateX(4px);
+}
+
+/* Right Visual Preview Stage */
+.feature-showcase-right {
+  position: relative;
+  border-radius: 20px;
+  overflow: hidden;
+  background-color: #171213;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.feature-visual-panel {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transform: translateY(40px) scale(0.97);
+  transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1), transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2.5rem;
+  box-sizing: border-box;
+}
+
+.feature-visual-panel.active {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+/* Visual Card Mockups inside the panels */
+.mockup-card-container {
+  width: 100%;
+  height: 100%;
+  border-radius: 18px;
+  background: linear-gradient(145deg, rgba(45, 35, 38, 0.8) 0%, rgba(27, 21, 23, 0.95) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 2rem;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+}
+
+/* Stepper dots at bottom right */
+.feature-showcase-nav-dots {
+  position: absolute;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  display: flex;
+  gap: 0.5rem;
+  z-index: 10;
+}
+
+.feature-nav-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.feature-nav-dot.active {
+  width: 24px;
+  border-radius: 10px;
+  background: #fbd38d;
+}
+
+@media (max-width: 900px) {
+  .feature-showcase-container {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+    padding: 1.25rem;
+    gap: 1.25rem;
+  }
+  .feature-showcase-sticky-frame {
+    height: 94vh;
+    padding: 0 1rem;
+  }
+}

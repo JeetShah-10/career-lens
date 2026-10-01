@@ -18,7 +18,7 @@ function escapeRegex(text) {
  * POST /api/analyses
  */
 const createAnalysis = asyncHandler(async (req, res) => {
-  const { resumeText, targetRole, jobDescription } = req.validated.body;
+  const { resumeText, targetRole, jobDescription, resumeSource: bodySource } = req.validated.body;
 
   // Run AI analysis through isolated service
   const result = await aiService.analyzeResume({
@@ -28,7 +28,7 @@ const createAnalysis = asyncHandler(async (req, res) => {
   });
 
   // Persist analysis strictly bound to verified user
-  const resumeSource = req.resumeSource || 'paste';
+  const resumeSource = req.resumeSource || bodySource || 'paste';
   const analysis = await Analysis.create({
     userId: req.user.id,
     resumeText,

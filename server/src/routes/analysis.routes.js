@@ -19,10 +19,10 @@ const env = require('../config/env');
 
 const router = express.Router();
 
-// Strict rate limit on analysis creation: 5 requests per minute per user/IP
+// Strict rate limit on analysis creation
 const analysisCreateLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: env.NODE_ENV === 'test' ? 1000 : 5,
+  max: env.NODE_ENV === 'test' ? 1000 : env.NODE_ENV === 'development' ? 60 : 15,
   keyGenerator: (req) => req.user?.id || req.ip,
   standardHeaders: true,
   legacyHeaders: false,

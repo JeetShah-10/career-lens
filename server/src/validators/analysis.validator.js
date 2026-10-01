@@ -77,6 +77,7 @@ const createAnalysisSchema = z
       .max(10000, 'Job description must not exceed 10,000 characters')
       .optional()
       .default(''),
+    resumeSource: z.enum(['paste', 'pdf', 'profile']).optional().default('paste'),
   })
   .strict();
 
