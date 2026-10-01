@@ -10,7 +10,7 @@ The app stores personal data (resumes) and calls a paid-by-default third-party A
 
 ## 1. Secrets and credentials
 
-- All secrets live only in server environment variables: `JWT_SECRET`, `MONGODB_URI`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL`, `CLIENT_ORIGIN`. The Gemini API key is used only by the Express server. If the team later wires the optional Groq contingency, add `GROQ_API_KEY` as a server secret and document the change.
+- All secrets live only in server environment variables: `JWT_SECRET`, `MONGODB_URI`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL`, `GEMINI_MODEL_CHAIN`, `GEMINI_MAX_ATTEMPTS`, `GEMINI_DEADLINE_MS`, `CLIENT_ORIGIN`. The Gemini API key is used only by the Express server. If the team later wires the optional Groq contingency, add `GROQ_API_KEY` as a server secret and document the change.
 - `.env` is in `.gitignore` from the first commit. Commit only `.env.example` with placeholder values.
 - **Zero secrets in the frontend.** Nothing sensitive in React code or in `VITE_`-prefixed env vars. Anything prefixed `VITE_` is public in the bundle. The only acceptable frontend variable is the API base URL.
 - `JWT_SECRET` must be at least 32 random characters. The server refuses to start if a required env var is missing.

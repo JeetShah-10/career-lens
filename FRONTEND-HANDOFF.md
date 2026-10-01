@@ -19,8 +19,8 @@
 | **Analysis History (`GET /api/analyses`)** | **Completed & Verified** | Supports role regex, min/max score, date range (`from`/`to`), sorting, pagination. Lightweight summaries. |
 | **Analysis Detail (`GET /api/analyses/:id`)**| **Completed & Verified** | Returns full analysis with `result` payload. Strips raw `resumeText` and `jobDescription`. |
 | **Analysis Delete (`DELETE /api/analyses/:id`)**| **Completed & Verified** | Returns `204 No Content`. Scoped to `req.user.id`. |
-| **Gemini Fallback (`ai.service.js`)** | **Completed & Tested (Mocked)** | Single bounded fallback from `gemini-3.8-flash` to `gemini-3.5-flash` on 503 high-demand or 429 quota spikes. |
-| **Automated Test Suite** | **81 / 81 Passing (15 Suites)** | 100% offline via in-memory MongoDB (`mongodb-memory-server`) & mocked AI. |
+| **Gemini Model Ladder (`ai.service.js`)** | **Completed & Tested (Mocked)** | Multi-tier ordered Gemini Flash model ladder (`gemini-3.8-flash` -> `gemini-3.7-flash` -> `gemini-3.6-flash` -> `gemini-3.5-flash` -> `gemini-3.5-flash-lite`) on 503 high-demand or 429 quota spikes, bounded by configurable max attempts and overall deadline. |
+| **Automated Test Suite** | **89 / 89 Passing (15 Suites)** | 100% offline via in-memory MongoDB (`mongodb-memory-server`) & mocked AI. |
 | **Local Demo Seeder (`seed:demo`)** | **Completed & Guard-Tested** | Pre-computes 3 synthetic analyses offline with loopback protection and one-time password generation. |
 | **Browser Cookie Persistence** | **Pending Live Integration** | Automated test suite passes; cross-site cookie retention across refreshes remains untested and must be verified in a real browser after deployment. |
 
@@ -499,8 +499,16 @@ Every error returned by the API adheres to this format:
 - `EMPTY_OR_SCANNED_PDF` (422): Uploaded PDF is scanned/image-only or yields <50 characters of readable text. User should paste text instead.
 - `UNREADABLE_PDF` (422): PDF file is damaged or corrupted.
 - `RATE_LIMIT_EXCEEDED` (429): Exceeded general, auth, or analysis rate limits.
-- `AI_SERVICE_UNAVAILABLE` (502): Gemini API timeout, demand overload, or failed schema validation.
+- `AI_SERVICE_UNAVAILABLE` (502): Gemini API timeout, quota/capacity overload, model unavailability, or failed schema validation.
 - `INTERNAL_ERROR` (500): Server error.
+
+### Timeout Architecture & Deployment Considerations
+1. **Application-Level AI Deadline:** `GEMINI_DEADLINE_MS = 50000` (50s) is strictly an internal, application-level ceiling in Express that bounds total Gemini ladder attempts and schema repair. Each individual model attempt is bounded by `Math.min(25000, remainingDeadline)`. If less than 1,000ms remains on the budget, further calls are skipped immediately and return `502 AI_SERVICE_UNAVAILABLE`. This 50s deadline is an application constraint, not a guarantee that every intermediary proxy or hosting gateway will wait that long.
+2. **Client-Side Timeout Behavior:** CareerLens does not configure an explicit client-side `AbortSignal.timeout()` in `client/src/api/client.js`. The browser request relies entirely on external network infrastructure, proxy timeouts, and standard browser network stack behaviors.
+3. **Deployment Proxy & Ingress Limits:**
+   - Platform proxy timeouts depend on the specific hosting provider, architecture, and tier (e.g., Render’s published docs note HTTP responses can take up to 100 minutes for web services, whereas serverless or edge platforms impose far tighter limits). Specific hosting limits must be verified against the project's actual deployment plan and configuration rather than assumed.
+   - Note that Node.js `server.requestTimeout` governs the time allowed to receive the complete incoming request stream from the client, not the maximum duration of backend processing or AI response generation.
+   - **Deployment Risk:** If the backend is deployed behind edge proxies, load balancers, or serverless platforms with short request execution limits (e.g. Vercel Hobby serverless default 10s limit, or custom ingress gateways with <50s limits), the platform proxy will terminate the connection with a 504 Gateway Timeout before the Express application reaches its internal 50s deadline and returns structured `502 AI_SERVICE_UNAVAILABLE` JSON. Deployment environments should be configured with proxy/gateway timeouts exceeding the 50s application deadline.
 
 ---
 

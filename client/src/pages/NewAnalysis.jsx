@@ -209,7 +209,7 @@ export default function NewAnalysis() {
           }}
         >
           <Sparkles size={12} color="#c2410c" />
-          <span>AI Neural Engine • Gemini 3.8 Flash</span>
+          <span>AI Neural Engine • Gemini Flash Ladder</span>
         </div>
 
         <h1
@@ -678,7 +678,7 @@ export default function NewAnalysis() {
             {submitting ? (
               <>
                 <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>✦</span>
-                <span>Synthesizing with Gemini 3.8 Flash...</span>
+                <span>Synthesizing AI appraisal...</span>
               </>
             ) : (
               <>

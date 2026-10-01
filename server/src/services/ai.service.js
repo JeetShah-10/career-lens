@@ -45,6 +45,44 @@ If a job description is provided, also include:
 }
 Do NOT include markdown fences, extra commentary, or trailing text outside the JSON object.`;
 
+// Supported candidate Flash models in descending quality/speed order
+const ALLOWED_FLASH_MODELS = [
+  'gemini-3.8-flash',
+  'gemini-3.7-flash',
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
+  'gemini-3.5-flash-lite',
+];
+
+/**
+ * Resolves the ordered model chain:
+ * 1. If GEMINI_MODEL_CHAIN is configured, parses and validates against ALLOWED_FLASH_MODELS.
+ * 2. Otherwise, uses primary GEMINI_MODEL, then GEMINI_FALLBACK_MODEL, then remaining ALLOWED_FLASH_MODELS.
+ * Deduplicates and limits to GEMINI_MAX_ATTEMPTS.
+ */
+function resolveModelChain() {
+  let rawList = [];
+  if (env.GEMINI_MODEL_CHAIN && typeof env.GEMINI_MODEL_CHAIN === 'string') {
+    rawList = env.GEMINI_MODEL_CHAIN.split(',').map((s) => s.trim()).filter(Boolean);
+  } else {
+    // Defined quality/speed ladder: gemini-3.8-flash -> 3.7 -> 3.6 -> 3.5 -> 3.5-lite
+    // If a custom primary GEMINI_MODEL is specified, start with it, then continue down the quality ladder.
+    const primary = env.GEMINI_MODEL || 'gemini-3.8-flash';
+    rawList = [primary, ...ALLOWED_FLASH_MODELS];
+  }
+
+  const chain = [];
+  for (const m of rawList) {
+    if (ALLOWED_FLASH_MODELS.includes(m) && !chain.includes(m)) {
+      chain.push(m);
+    }
+  }
+
+  const maxAttempts = env.GEMINI_MAX_ATTEMPTS || 5;
+  const resolved = chain.slice(0, maxAttempts);
+  return resolved.length > 0 ? resolved : ['gemini-3.8-flash'];
+}
+
 /**
  * Strips markdown code fences and extracts the outermost JSON object substring.
  */
@@ -75,21 +113,62 @@ function cleanJsonString(raw) {
 }
 
 /**
- * Parses and validates raw AI response string against aiOutputSchema.
+ * Detects model-specific "not found / unavailable in project/region" errors (HTTP 404),
+ * requiring concrete evidence that the specific model ID is unavailable or unsupported.
+ * Never treats a generic endpoint 404 (e.g. unrecognized URL path) or auth (401/403/400)
+ * as a model-specific not found error.
  */
+function isModelNotFoundError(err, modelId) {
+  if (!err) return false;
+  const status = Number(err.status);
+  const message = String(err.message || '');
+  const lowerMsg = message.toLowerCase();
+
+  // Never confuse authentication, permission, or malformed request errors with model not found
+  if (status === 400 || status === 401 || status === 403) {
+    return false;
+  }
+
+  // Must indicate a 404 / NOT_FOUND / does not exist / unsupported condition
+  const is404OrNotFound =
+    status === 404 ||
+    lowerMsg.includes('not_found') ||
+    lowerMsg.includes('not found') ||
+    lowerMsg.includes('does not exist') ||
+    lowerMsg.includes('is not supported');
+
+  if (!is404OrNotFound) {
+    return false;
+  }
+
+  // Must have concrete evidence that the specific model ID is unavailable/unsupported,
+  // not merely a generic endpoint/proxy 404 (e.g. "404 Not Found: Cannot POST /unknown")
+  const modelSpecificEvidence = [
+    modelId ? modelId.toLowerCase() : null,
+    'models/',
+    'model not found',
+    'model does not exist',
+    'not supported for this project',
+    'not supported for generatecontent',
+  ].filter(Boolean);
+
+  return modelSpecificEvidence.some((sig) => lowerMsg.includes(sig));
+}
+
 /**
- * Classifies whether a Gemini error is retryable for the single bounded fallback attempt.
+ * Classifies whether a Gemini error is retryable for advancing through the model ladder.
  *
  * Retryable:
  * - HTTP 503 / Service Unavailable / High demand / Overloaded
  * - HTTP 429 / RESOURCE_EXHAUSTED / Quota limit / Rate limit
+ * - HTTP 504 / Gateway Timeout / Request timed out
  * - Transient network disconnections (ECONNRESET, ETIMEDOUT, fetch failed)
  *
- * Non-retryable (do NOT fall back or retry):
+ * Non-retryable (stops ladder immediately):
  * - HTTP 400 / Invalid Argument / Bad Request
  * - HTTP 401 / Unauthorized / Invalid API Key
  * - HTTP 403 / Forbidden / Permission Denied
- * - HTTP 404 / Not Found / Model Not Found
+ * (Note: Model Not Found 404 is handled separately by isModelNotFoundError to advance the ladder)
  */
 function isRetryableError(err) {
   if (!err) return false;
@@ -98,12 +177,17 @@ function isRetryableError(err) {
   const message = String(err.message || '');
 
   // Explicit non-retryable HTTP status codes
-  if (status === 400 || status === 401 || status === 403 || status === 404) {
+  if (status === 400 || status === 401 || status === 403) {
+    return false;
+  }
+
+  // Model-not-found is handled specifically to advance ladder, not as generic retryable
+  if (status === 404 || isModelNotFoundError(err)) {
     return false;
   }
 
   // Explicit retryable HTTP status codes
-  if (status === 429 || status === 503) {
+  if (status === 429 || status === 503 || status === 504 || status === 502) {
     return true;
   }
 
@@ -112,7 +196,6 @@ function isRetryableError(err) {
     'API_KEY_INVALID',
     'INVALID_ARGUMENT',
     'PERMISSION_DENIED',
-    'NOT_FOUND',
     'unauthorized',
   ];
   if (nonRetryableSignals.some((sig) => message.includes(sig))) {
@@ -123,6 +206,7 @@ function isRetryableError(err) {
   const retryableSignals = [
     '503',
     '429',
+    '504',
     'RESOURCE_EXHAUSTED',
     'quota',
     'rate limit',
@@ -131,16 +215,13 @@ function isRetryableError(err) {
     'UNAVAILABLE',
     'ECONNRESET',
     'ETIMEDOUT',
+    'timed out',
     'fetch failed',
   ];
 
   return retryableSignals.some((sig) => message.includes(sig));
 }
 
-/**
- * Normalizes finite numeric scores to integers to satisfy the integer Zod schema.
- * Does NOT invent missing fields, does NOT pad arrays, and does NOT fabricate advice.
- */
 /**
  * Transforms decimal floating-point scores into integers to meet the integer Zod schema.
  * Note: This is a deliberate numeric transformation.
@@ -188,24 +269,39 @@ function parseAndValidate(rawText) {
   return aiOutputSchema.parse(normalized);
 }
 
-// Global attempt ceiling per user analysis request: strictly at most 2 provider calls
-const MAX_TOTAL_PROVIDER_CALLS = 2;
-
+/**
+ * Tracks attempt budget and shared request deadline across model ladder invocations.
+ */
 class CallBudget {
-  constructor(maxCalls = MAX_TOTAL_PROVIDER_CALLS) {
+  constructor({
+    maxCalls = env.GEMINI_MAX_ATTEMPTS || 5,
+    deadlineMs = env.GEMINI_DEADLINE_MS || 50000,
+  } = {}) {
     this.maxCalls = maxCalls;
+    this.deadline = Date.now() + deadlineMs;
     this.callsMade = 0;
-    this.activeModel = env.GEMINI_MODEL;
+    this.activeModel = null;
     this.modelsInvoked = [];
   }
 
-  canCall() {
-    return this.callsMade < this.maxCalls;
+  remainingTimeMs() {
+    return Math.max(0, this.deadline - Date.now());
+  }
+
+  hasTimeRemaining(minBufferMs = 1000) {
+    return this.remainingTimeMs() >= minBufferMs;
+  }
+
+  canCall(minBufferMs = 1000) {
+    return this.callsMade < this.maxCalls && this.hasTimeRemaining(minBufferMs);
   }
 
   recordCall(model) {
-    if (!this.canCall()) {
-      throw new Error(`AI attempt budget exceeded: maximum ${this.maxCalls} provider calls allowed per analysis.`);
+    if (!this.canCall(1000)) {
+      if (this.callsMade >= this.maxCalls) {
+        throw new Error(`AI attempt budget exceeded: maximum ${this.maxCalls} provider calls allowed per analysis.`);
+      }
+      throw new Error(`AI request deadline reached (${this.remainingTimeMs()}ms remaining).`);
     }
     this.callsMade++;
     this.activeModel = model;
@@ -228,12 +324,21 @@ function getGenAiClient() {
 }
 
 /**
- * Performs a single call to Gemini generateContent with 35-second abort timeout.
+ * Performs a single call to Gemini generateContent with dynamic deadline-aware timeout.
+ * Conforms to Gemini 3.8 / 3.x Flash migration standards:
+ * - Uses thinkingConfig: { thinkingLevel: 'low' } for fast, deterministic evaluation.
+ * - Does not pass deprecated temperature, topK, or topP.
+ * - Caps per-attempt execution at timeoutMs (default 25s), never inflating beyond remaining deadline.
  */
-async function callGeminiOnce(contents, systemInstruction, model = env.GEMINI_MODEL) {
+async function callGeminiOnce(contents, systemInstruction, model = env.GEMINI_MODEL, timeoutMs = 25000) {
+  if (timeoutMs < 1000) {
+    const timeoutError = new Error('AI request deadline reached before call start');
+    timeoutError.status = 504;
+    throw timeoutError;
+  }
   const client = getGenAiClient();
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 35000);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await client.models.generateContent({
@@ -241,8 +346,10 @@ async function callGeminiOnce(contents, systemInstruction, model = env.GEMINI_MO
       contents,
       config: {
         systemInstruction,
-        temperature: 0.2,
         responseMimeType: 'application/json',
+        thinkingConfig: {
+          thinkingLevel: 'low',
+        },
         abortSignal: controller.signal,
       },
     });
@@ -252,45 +359,107 @@ async function callGeminiOnce(contents, systemInstruction, model = env.GEMINI_MO
   } catch (err) {
     clearTimeout(timeoutId);
     if (controller.signal.aborted) {
-      throw new Error('AI request timed out after 35 seconds');
+      const timeoutError = new Error(`AI request timed out after ${Math.round(timeoutMs / 1000)} seconds`);
+      timeoutError.status = 504;
+      throw timeoutError;
     }
     throw err;
   }
 }
 
 /**
- * Invokes Gemini with single bounded fallback to GEMINI_FALLBACK_MODEL on retryable 503/429 errors.
- * Strictly bounded by the CallBudget.
+ * Traverses the ordered Gemini Flash model ladder.
+ * - Advances to the next model if candidate model is not found/unavailable in project (404 with model evidence).
+ * - Advances to the next model on retryable 429/503/504/transient network errors.
+ * - Non-retryable 400/401/403 or generic 404 aborts immediately (never hides bad credentials, invalid requests, or broken endpoints).
+ * - Guaranteed one generation attempt per model.
  */
 async function invokeWithFallback(contents, systemInstruction, budget) {
-  budget.recordCall(env.GEMINI_MODEL);
+  const modelChain = resolveModelChain();
+  let lastError = null;
 
-  try {
-    return await callGeminiOnce(contents, systemInstruction, env.GEMINI_MODEL);
-  } catch (err) {
-    const canFallback =
-      budget.canCall() &&
-      isRetryableError(err) &&
-      env.GEMINI_FALLBACK_MODEL &&
-      env.GEMINI_FALLBACK_MODEL !== env.GEMINI_MODEL;
+  for (let i = 0; i < modelChain.length; i++) {
+    const model = modelChain[i];
 
-    if (canFallback) {
-      logger.warn('Primary Gemini model experienced retryable capacity or demand limit, attempting single bounded fallback', {
-        primaryModel: env.GEMINI_MODEL,
-        fallbackModel: env.GEMINI_FALLBACK_MODEL,
-        status: err.status,
+    if (!budget.canCall(1000)) {
+      logger.warn('AI call budget or deadline reached, cannot attempt further models in ladder', {
+        callsMade: budget.callsMade,
+        maxCalls: budget.maxCalls,
+        remainingTimeMs: budget.remainingTimeMs(),
+        candidateModel: model,
       });
-
-      if (process.env.NODE_ENV !== 'test') {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
-
-      budget.recordCall(env.GEMINI_FALLBACK_MODEL);
-      return await callGeminiOnce(contents, systemInstruction, env.GEMINI_FALLBACK_MODEL);
+      break;
     }
 
-    throw err;
+    budget.recordCall(model);
+
+    try {
+      const timeoutMs = Math.min(25000, budget.remainingTimeMs());
+      const raw = await callGeminiOnce(contents, systemInstruction, model, timeoutMs);
+      return typeof raw === 'object' && raw !== null && raw.text ? raw.text : raw;
+    } catch (err) {
+      lastError = err;
+
+      // Handle model-specific not found / unavailable in project/region consistently for ALL models
+      if (isModelNotFoundError(err, model)) {
+        logger.warn('Candidate Gemini model not found or unavailable in project/region, advancing to next model in ladder', {
+          candidateModel: model,
+          status: err.status,
+          error: err.message,
+          ladderIndex: i + 1,
+          totalModels: modelChain.length,
+        });
+
+        const hasNextModel = i + 1 < modelChain.length && budget.canCall(1000);
+        if (hasNextModel) {
+          continue;
+        } else {
+          logger.error('All available candidate models in ladder returned not found or budget exhausted', {
+            lastAttemptedModel: model,
+            callsMade: budget.callsMade,
+            error: err.message,
+          });
+          break;
+        }
+      }
+
+      // Explicit non-retryable errors abort ladder immediately (400, 401, 403, and generic 404)
+      if (!isRetryableError(err)) {
+        logger.error('Non-retryable error encountered from Gemini model, stopping ladder immediately', {
+          model,
+          status: err.status,
+          error: err.message,
+        });
+        throw err;
+      }
+
+      // Retryable capacity/demand error (429, 503, 504, transient network/timeout)
+      const hasNextModel = i + 1 < modelChain.length && budget.canCall(1000);
+      if (hasNextModel) {
+        const nextModel = modelChain[i + 1];
+        logger.warn('Gemini model experienced retryable capacity or demand limit, advancing to next model in ladder', {
+          attemptedModel: model,
+          nextModel,
+          status: err.status,
+          error: err.message,
+          attemptIndex: i + 1,
+          totalModels: modelChain.length,
+        });
+
+        if (process.env.NODE_ENV !== 'test') {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      } else {
+        logger.error('All available models in ladder failed or budget exhausted', {
+          attemptedModel: model,
+          callsMade: budget.callsMade,
+          error: err.message,
+        });
+      }
+    }
   }
+
+  throw lastError || new Error('All models in Gemini ladder failed to generate response');
 }
 
 /**
@@ -302,8 +471,8 @@ async function callGemini(contents, systemInstruction, budget = new CallBudget()
 
 /**
  * Analyzes resume text against target role (and optional job description).
- * Implements safe prompt delimiters, input truncation, bounded model fallback,
- * and a single schema repair retry. Total provider calls strictly capped at MAX_TOTAL_PROVIDER_CALLS (2).
+ * Implements safe prompt delimiters, input truncation, ordered Flash model ladder,
+ * and a single schema repair retry if budget permits.
  *
  * @param {Object} params
  * @param {string} params.resumeText
@@ -311,7 +480,7 @@ async function callGemini(contents, systemInstruction, budget = new CallBudget()
  * @param {string} [params.jobDescription]
  * @returns {Promise<Object>} validated analysis result
  */
-async function analyzeResume({ resumeText, targetRole, jobDescription }) {
+async function analyzeResume({ resumeText, targetRole, jobDescription }, callBudget = null) {
   // Truncate inputs to safe length limits
   const safeResume = resumeText.slice(0, 12000);
   const safeJobDesc = jobDescription ? jobDescription.slice(0, 6000) : '';
@@ -332,13 +501,13 @@ async function analyzeResume({ resumeText, targetRole, jobDescription }) {
     hasJobDescription: Boolean(safeJobDesc),
   });
 
-  const budget = new CallBudget(MAX_TOTAL_PROVIDER_CALLS);
+  const budget = callBudget || new CallBudget();
 
   let rawOutput;
   try {
     rawOutput = await invokeWithFallback(prompt, SYSTEM_INSTRUCTION, budget);
   } catch (err) {
-    logger.error('Gemini API call failed', {
+    logger.error('Gemini API call failed across model ladder', {
       error: err.message,
       targetRole,
       callsMade: budget.callsMade,
@@ -358,11 +527,12 @@ async function analyzeResume({ resumeText, targetRole, jobDescription }) {
       callsMade: budget.callsMade,
     });
 
-    // Check if attempt budget permits a schema repair attempt
-    if (!budget.canCall()) {
-      logger.error('Cannot attempt schema repair: call budget exhausted', {
+    // Check if attempt budget permits a schema repair attempt (must have at least 1s remaining)
+    if (!budget.canCall(1000)) {
+      logger.error('Cannot attempt schema repair: call budget or deadline exhausted', {
         callsMade: budget.callsMade,
         maxCalls: budget.maxCalls,
+        remainingTimeMs: budget.remainingTimeMs(),
       });
       throw new AiError();
     }
@@ -377,7 +547,8 @@ async function analyzeResume({ resumeText, targetRole, jobDescription }) {
         repairModel,
         callCount: budget.callsMade,
       });
-      const retryOutput = await callGeminiOnce(retryPrompt, SYSTEM_INSTRUCTION, repairModel);
+      const timeoutMs = Math.min(25000, budget.remainingTimeMs());
+      const retryOutput = await callGeminiOnce(retryPrompt, SYSTEM_INSTRUCTION, repairModel, timeoutMs);
       const retryValidated = parseAndValidate(retryOutput);
       return retryValidated;
     } catch (retryErr) {
@@ -397,6 +568,10 @@ module.exports = {
   parseAndValidate,
   normalizeAiParsedJson,
   isRetryableError,
+  isModelNotFoundError,
+  resolveModelChain,
+  ALLOWED_FLASH_MODELS,
+  CallBudget,
   SYSTEM_INSTRUCTION,
   // Helper for test fixtures / dependency injection
   _setGenAiClient(mockClient) {
