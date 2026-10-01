@@ -6,32 +6,28 @@ const scoreBreakdownSchema = z
     experience: z.number().int().min(0).max(100),
     formatting: z.number().int().min(0).max(100),
     impact: z.number().int().min(0).max(100),
-  })
-  .strict();
+  });
 
 const recommendedSkillSchema = z
   .object({
     skill: z.string().trim().min(1),
     priority: z.enum(['high', 'medium', 'low']),
     why: z.string().trim().min(1),
-  })
-  .strict();
+  });
 
 const careerSuggestionSchema = z
   .object({
     role: z.string().trim().min(1),
     matchPercent: z.number().int().min(0).max(100),
     reason: z.string().trim().min(1),
-  })
-  .strict();
+  });
 
 const jobMatchSchema = z
   .object({
     matchPercent: z.number().int().min(0).max(100),
     matchedKeywords: z.array(z.string().trim().min(1)),
     missingKeywords: z.array(z.string().trim().min(1)),
-  })
-  .strict();
+  });
 
 const roadmapStepSchema = z
   .object({
@@ -39,8 +35,7 @@ const roadmapStepSchema = z
     skill: z.string().trim().min(1),
     action: z.string().trim().min(1),
     timeframe: z.string().trim().min(1),
-  })
-  .strict();
+  });
 
 // AI output schema matching Section 6 of AGENTS.md exactly
 const aiOutputSchema = z
@@ -55,8 +50,7 @@ const aiOutputSchema = z
     careerSuggestions: z.array(careerSuggestionSchema).min(3).max(5),
     jobMatch: jobMatchSchema.optional(),
     roadmap: z.array(roadmapStepSchema).optional(),
-  })
-  .strict();
+  });
 
 // Request body validation schema for creating an analysis
 const createAnalysisSchema = z

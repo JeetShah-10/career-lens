@@ -31,12 +31,23 @@ You must return a valid JSON object matching this exact specification:
   ],
   "careerSuggestions": [
     {
-      "role": "<career/job title>",
+      "role": "<career title 1>",
+      "matchPercent": <integer 0-100>,
+      "reason": "<specific reason tied to the resume>"
+    },
+    {
+      "role": "<career title 2>",
+      "matchPercent": <integer 0-100>,
+      "reason": "<specific reason tied to the resume>"
+    },
+    {
+      "role": "<career title 3>",
       "matchPercent": <integer 0-100>,
       "reason": "<specific reason tied to the resume>"
     }
   ]
 }
+IMPORTANT: careerSuggestions MUST contain at least 3 distinct roles (3 to 5 items).
 If a job description is provided, also include:
 "jobMatch": {
   "matchPercent": <integer 0-100>,
@@ -93,9 +104,7 @@ function cleanJsonString(raw) {
   // Strip ```json ... ``` or ``` ... ```
   if (str.startsWith('```')) {
     const lines = str.split('\n');
-    // Remove first line (e.g. ```json)
     lines.shift();
-    // Remove last line if it's ```
     if (lines.length > 0 && lines[lines.length - 1].trim().startsWith('```')) {
       lines.pop();
     }
